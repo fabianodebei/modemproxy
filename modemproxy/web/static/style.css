@@ -1,0 +1,31 @@
+:root {
+  --bg: #0f1115; --panel: #171a21; --line: #262b36;
+  --text: #e6e9ef; --muted: #8b93a7; --accent: #4f8cff;
+  --green: #2ecc71; --red: #e74c3c; --gray: #6b7280;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; font: 14px/1.5 system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+}
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 24px; border-bottom: 1px solid var(--line);
+}
+h1 { font-size: 18px; margin: 0; letter-spacing: .5px; }
+button {
+  background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; font-size: 13px;
+}
+button:hover { filter: brightness(1.1); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; }
+.empty { color: var(--muted); text-align: center; padding: 32px; }
+.badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; text-transform: uppercase; }
+.badge.online { background: rgba(46,204,113,.15); color: var(--green); }
+.badge.offline { background: rgba(231,76,60,.15); color: var(--red); }
+.badge.unknown { background: rgba(107,114,128,.2); color: var(--gray); }
+.actions button { background: var(--panel); border: 1px solid var(--line); }
+footer { padding: 16px 24px; color: var(--muted); }

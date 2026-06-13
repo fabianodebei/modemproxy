@@ -1,0 +1,97 @@
+"""Allocate proxy ports and render per-modem 3proxy configs + systemd units."""
+from __future__ import annotations
+
+import secrets
+import subprocess
+from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+from .. import db
+from ..config import AUTOGEN_DIR, get_config
+
+_TEMPLATES = Path(__file__).parent / "templates"
+_env = Environment(
+    loader=FileSystemLoader(str(_TEMPLATES)),
+    autoescape=select_autoescape(enabled_extensions=()),
+    keep_trailing_newline=True,
+)
+
+
+def _modem_index(imei: str) -> int:
+    """Stable small integer per modem, used to derive default ports."""
+    modems = sorted(m["imei"] for m in db.list_modems())
+    return modems.index(imei) + 1 if imei in modems else len(modems) + 1
+
+
+def allocate_port(imei: str, *, username: str | None = None,
+                  password: str | None = None, auth: bool = True) -> dict:
+    """Create/refresh the port record for a modem and pick free ports."""
+    cfg = get_config()
+    existing = db.get_port(imei)
+    idx = _modem_index(imei)
+    http_port = (existing or {}).get("http_port") or cfg.http_port_base + idx
+    socks_port = (existing or {}).get("socks_port") or cfg.socks_port_base + idx
+    if auth:
+        username = username or (existing or {}).get("username") or f"u{idx}"
+        password = password or (existing or {}).get("password") or secrets.token_hex(8)
+    else:
+        username = password = None
+    db.set_port(imei, http_port=http_port, socks_port=socks_port,
+                username=username, password=password, enabled=1)
+    return db.get_port(imei)
+
+
+def render_modem(imei: str) -> Path:
+    """Write the 3proxy config for one modem; return its path."""
+    cfg = get_config()
+    modem = db.get_modem(imei)
+    port = db.get_port(imei)
+    if not modem or not port:
+        raise ValueError(f"modem/port not configured for {imei}")
+    dns = " ".join(cfg.dns_servers) if cfg.dns_servers else "1.1.1.1"
+    name = modem.get("name") or imei[-6:]
+    text = _env.get_template("3proxy.cfg.j2").render(
+        imei=imei,
+        name=name,
+        dns=dns,
+        username=port.get("username"),
+        password=port.get("password"),
+        http_port=port["http_port"],
+        socks_port=port["socks_port"],
+        modem_ip=modem.get("ip") or "0.0.0.0",
+        bind_address=cfg.bind_address,
+    )
+    AUTOGEN_DIR.mkdir(parents=True, exist_ok=True)
+    out = AUTOGEN_DIR / f"3proxy.{name}.cfg"
+    out.write_text(text)
+    return out
+
+
+def purge_port(imei: str) -> None:
+    modem = db.get_modem(imei) or {}
+    name = modem.get("name") or imei[-6:]
+    db.delete_port(imei)
+    cfg_file = AUTOGEN_DIR / f"3proxy.{name}.cfg"
+    cfg_file.unlink(missing_ok=True)
+    _systemctl("stop", f"modemproxy-proxy@{name}.service")
+    _systemctl("disable", f"modemproxy-proxy@{name}.service")
+
+
+def apply_port(imei: str, **alloc_kwargs) -> dict:
+    """Allocate, render and (re)start the proxy for one modem."""
+    port = allocate_port(imei, **alloc_kwargs)
+    render_modem(imei)
+    modem = db.get_modem(imei) or {}
+    name = modem.get("name") or imei[-6:]
+    _systemctl("enable", f"modemproxy-proxy@{name}.service")
+    _systemctl("restart", f"modemproxy-proxy@{name}.service")
+    return port
+
+
+def _systemctl(action: str, unit: str) -> None:
+    try:
+        subprocess.run(["systemctl", action, unit], check=False,
+                       capture_output=True, text=True)
+    except FileNotFoundError:
+        pass  # not on a systemd host (dev/macOS)

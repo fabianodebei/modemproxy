@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modemproxy"
+version = "0.1.0"
+description = "Turn a box full of 4G/LTE USB modems into a pool of rotating HTTP/SOCKS proxies"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Fabiano De Bei" }]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "jinja2>=3.1",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[project.scripts]
+modemproxy = "modemproxy.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["modemproxy*"]
+
+[tool.setuptools.package-data]
+"modemproxy.proxy" = ["templates/*.j2"]
+"modemproxy.web" = ["templates/*.html", "static/*"]

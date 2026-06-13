@@ -1,0 +1,31 @@
+# Roadmap
+
+Status of feature parity with a full commercial modem-proxy manager.
+
+## Done (v0.1)
+- ModemManager-based discovery (vendor-agnostic)
+- SQLite store: modems, ports, rotation log, SMS, bandwidth schema
+- Per-modem 3proxy generation (HTTP + SOCKS5, per-modem egress IP)
+- Manual IP rotation (single + all) with logging
+- Web panel (HTMX) + JSON API + CLI
+- SMS list/send via ModemManager
+- systemd units, udev auto-discovery, one-command installer
+
+## Next
+- **Bandwidth accounting** — poll per-interface counters into `bandwidth`
+  table; expose reports (mirrors `bandwidth_report_*`).
+- **Per-port rotation timers** — honour `ports.rotation_interval` via a
+  background scheduler / systemd timer per modem.
+- **USSD** — balance checks (`send_ussd_json`).
+- **Connectivity tests / speedtest** — per-modem `conn_test`, `speedtest`,
+  `test_proxy_http`.
+- **Rotation hooks** — trigger rotation via authenticated URL (link rotation).
+- **Allocation API** — Redis-backed pool endpoint that hands out a random live
+  proxy (the residential-style allocation layer).
+
+## Later
+- OpenVPN per-modem export
+- OS/TCP fingerprint spoofing layer
+- Multi-IP / sticky sessions
+- Prometheus metrics endpoint
+- Postgres backend option for multi-node

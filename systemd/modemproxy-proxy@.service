@@ -1,0 +1,15 @@
+[Unit]
+Description=modemproxy 3proxy instance for modem %i
+After=network.target
+PartOf=modemproxy.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/3proxy /etc/modemproxy/autogen/3proxy.%i.cfg
+Restart=always
+RestartSec=3
+LimitNOFILE=16000
+User=root
+
+[Install]
+WantedBy=multi-user.target

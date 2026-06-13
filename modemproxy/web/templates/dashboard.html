@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>modemproxy</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>modemproxy</h1>
+    <button hx-post="/ui/discover" hx-target="#rows" hx-swap="innerHTML">Discover</button>
+  </header>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th><th>IMEI</th><th>Operator</th><th>IP</th>
+        <th>Signal</th><th>HTTP</th><th>SOCKS</th><th>Status</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      {% include "_modem_rows.html" %}
+    </tbody>
+  </table>
+
+  <footer>
+    <small>Proxies bind on {{ cfg.bind_address }} · panel on
+      {{ cfg.web_host }}:{{ cfg.web_port }}</small>
+  </footer>
+</body>
+</html>

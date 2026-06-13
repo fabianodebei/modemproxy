@@ -1,0 +1,5 @@
+# modemproxy: re-run discovery when a WWAN modem is added or removed.
+# ModemManager already claims the modems; we only trigger a DB resync.
+ACTION=="add",    SUBSYSTEM=="net",  ENV{ID_MM_CANDIDATE}=="1", RUN+="/opt/modemproxy/venv/bin/modemproxy discover"
+ACTION=="remove", SUBSYSTEM=="net",  ENV{ID_MM_CANDIDATE}=="1", RUN+="/opt/modemproxy/venv/bin/modemproxy discover"
+ACTION=="add",    SUBSYSTEM=="usb",  ENV{ID_MM_CANDIDATE}=="1", RUN+="/opt/modemproxy/venv/bin/modemproxy discover"

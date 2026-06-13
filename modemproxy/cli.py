@@ -1,0 +1,187 @@
+"""modemproxy command-line interface.
+
+Subcommands mirror the operational surface of a modem-proxy box:
+discovery, status, port allocation, rotation, SMS, bandwidth.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from . import db
+from .modems import control, manager
+from .proxy import generator
+
+
+def _print_json(obj) -> None:
+    print(json.dumps(obj, indent=2, default=str))
+
+
+def cmd_init_db(args) -> int:
+    db.init_db()
+    print("database initialised")
+    return 0
+
+
+def cmd_discover(args) -> int:
+    found = manager.discover()
+    _print_json(found) if args.json else print(f"discovered {len(found)} modem(s)")
+    return 0
+
+
+def cmd_list(args) -> int:
+    modems = db.list_modems()
+    if args.json:
+        _print_json(modems)
+        return 0
+    if not modems:
+        print("no modems (run: modemproxy discover)")
+        return 0
+    hdr = f"{'NAME':<12}{'IMEI':<18}{'OPERATOR':<16}{'IP':<16}{'SIG':<5}{'HTTP':<7}{'SOCKS':<7}{'STATUS'}"
+    print(hdr)
+    for m in modems:
+        print(f"{(m.get('name') or '-'):<12}{(m.get('imei') or '-'):<18}"
+              f"{(m.get('operator') or '-'):<16}{(m.get('ip') or '-'):<16}"
+              f"{(m.get('signal') or 0):<5}{(m.get('http_port') or '-'):<7}"
+              f"{(m.get('socks_port') or '-'):<7}{m.get('status') or '-'}")
+    return 0
+
+
+def cmd_status(args) -> int:
+    manager.discover()
+    return cmd_list(args)
+
+
+def cmd_apply_port(args) -> int:
+    port = generator.apply_port(
+        args.imei,
+        username=args.user,
+        password=args.password,
+        auth=not args.no_auth,
+    )
+    _print_json(port)
+    return 0
+
+
+def cmd_purge_port(args) -> int:
+    generator.purge_port(args.imei)
+    print(f"purged proxy for {args.imei}")
+    return 0
+
+
+def cmd_rotate(args) -> int:
+    res = manager.rotate(args.imei, reason="cli")
+    _print_json(res)
+    return 0
+
+
+def cmd_rotate_all(args) -> int:
+    _print_json(manager.rotate_all(reason="cli"))
+    return 0
+
+
+def cmd_reset(args) -> int:
+    manager.reset_modem(args.imei)
+    print(f"reset sent to {args.imei}")
+    return 0
+
+
+def cmd_rotation_log(args) -> int:
+    _print_json(db.rotation_log(args.imei, args.limit))
+    return 0
+
+
+def cmd_name(args) -> int:
+    db.upsert_modem(args.imei, name=args.name)
+    print(f"{args.imei} -> {args.name}")
+    return 0
+
+
+def cmd_list_sms(args) -> int:
+    mid = manager._mm_id_for(args.imei)
+    if not mid:
+        print("modem not present", file=sys.stderr)
+        return 1
+    _print_json(control.list_sms(mid))
+    return 0
+
+
+def cmd_send_sms(args) -> int:
+    mid = manager._mm_id_for(args.imei)
+    if not mid:
+        print("modem not present", file=sys.stderr)
+        return 1
+    control.send_sms(mid, args.number, args.text)
+    print("sent")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="modemproxy", description=__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def add(name, fn, help_):
+        sp = sub.add_parser(name, help=help_)
+        sp.set_defaults(func=fn)
+        return sp
+
+    add("init-db", cmd_init_db, "create database schema")
+
+    sp = add("discover", cmd_discover, "scan ModemManager and sync DB")
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("list", cmd_list, "list known modems")
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("status", cmd_status, "discover then list (live)")
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("apply-port", cmd_apply_port, "allocate + start proxy for a modem")
+    sp.add_argument("imei")
+    sp.add_argument("--user")
+    sp.add_argument("--password")
+    sp.add_argument("--no-auth", action="store_true", help="open proxy, no credentials")
+
+    sp = add("purge-port", cmd_purge_port, "stop + remove proxy for a modem")
+    sp.add_argument("imei")
+
+    sp = add("rotate", cmd_rotate, "force new IP on one modem")
+    sp.add_argument("imei")
+
+    add("rotate-all", cmd_rotate_all, "force new IP on all online modems")
+
+    sp = add("reset", cmd_reset, "soft-reset a modem")
+    sp.add_argument("imei")
+
+    sp = add("rotation-log", cmd_rotation_log, "show rotation history")
+    sp.add_argument("imei", nargs="?")
+    sp.add_argument("--limit", type=int, default=50)
+
+    sp = add("name", cmd_name, "set a friendly nick for a modem")
+    sp.add_argument("imei")
+    sp.add_argument("name")
+
+    sp = add("list-sms", cmd_list_sms, "list SMS on a modem")
+    sp.add_argument("imei")
+
+    sp = add("send-sms", cmd_send_sms, "send an SMS from a modem")
+    sp.add_argument("imei")
+    sp.add_argument("number")
+    sp.add_argument("text")
+
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    db.init_db()
+    try:
+        return args.func(args)
+    except control.MMError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

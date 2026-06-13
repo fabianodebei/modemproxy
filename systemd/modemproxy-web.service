@@ -1,0 +1,15 @@
+[Unit]
+Description=modemproxy admin panel + API
+After=network.target ModemManager.service
+Wants=ModemManager.service
+
+[Service]
+Type=simple
+ExecStart=/opt/modemproxy/venv/bin/uvicorn modemproxy.web.app:app --host 0.0.0.0 --port 6997
+Environment=MODEMPROXY_CONFIG=/etc/modemproxy/config.yaml
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

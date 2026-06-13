@@ -1,0 +1,9 @@
+[Unit]
+Description=modemproxy periodic discovery + health sync
+After=network.target ModemManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/modemproxy/venv/bin/modemproxy discover
+Environment=MODEMPROXY_CONFIG=/etc/modemproxy/config.yaml
+User=root
