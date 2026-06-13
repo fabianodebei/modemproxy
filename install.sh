@@ -2,13 +2,23 @@
 #
 # modemproxy one-command installer for Ubuntu.
 #
-#   curl -fsSL https://raw.githubusercontent.com/fabianodebei/modemproxy/main/install.sh | sudo bash
+# Private repo — pass a GitHub token (a fine-grained PAT with read access to
+# the repo, or a classic PAT with `repo` scope):
+#
+#   curl -fsSL -H "Authorization: token GHP_xxx" \
+#     https://raw.githubusercontent.com/fabianodebei/modemproxy/main/install.sh \
+#     | sudo MODEMPROXY_TOKEN=GHP_xxx bash
 #
 # Idempotent: safe to re-run to upgrade.
 set -euo pipefail
 
-REPO="${MODEMPROXY_REPO:-https://github.com/fabianodebei/modemproxy.git}"
+TOKEN="${MODEMPROXY_TOKEN:-}"
 BRANCH="${MODEMPROXY_BRANCH:-main}"
+if [ -n "$TOKEN" ]; then
+    REPO="${MODEMPROXY_REPO:-https://${TOKEN}@github.com/fabianodebei/modemproxy.git}"
+else
+    REPO="${MODEMPROXY_REPO:-https://github.com/fabianodebei/modemproxy.git}"
+fi
 PREFIX="/opt/modemproxy"
 SRC="$PREFIX/src"
 VENV="$PREFIX/venv"
@@ -35,14 +45,20 @@ systemctl enable --now ModemManager.service || true
 log "Fetching modemproxy source ($BRANCH)"
 mkdir -p "$PREFIX"
 if [ -d "$SRC/.git" ]; then
-    git -C "$SRC" fetch --quiet origin "$BRANCH"
-    git -C "$SRC" reset --hard --quiet "origin/$BRANCH"
+    git -C "$SRC" fetch --quiet "$REPO" "$BRANCH"
+    git -C "$SRC" reset --hard --quiet FETCH_HEAD
 elif [ -f "$(dirname "$0")/pyproject.toml" ]; then
     # running from a local checkout
     cp -a "$(cd "$(dirname "$0")" && pwd)/." "$SRC/" 2>/dev/null || true
     [ -f "$SRC/pyproject.toml" ] || { rm -rf "$SRC"; git clone --quiet --branch "$BRANCH" "$REPO" "$SRC"; }
 else
     git clone --quiet --branch "$BRANCH" "$REPO" "$SRC"
+fi
+
+# Don't persist the token inside .git/config
+if [ -n "$TOKEN" ] && [ -d "$SRC/.git" ]; then
+    git -C "$SRC" remote set-url origin \
+        "https://github.com/fabianodebei/modemproxy.git" 2>/dev/null || true
 fi
 
 log "Creating Python virtualenv"

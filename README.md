@@ -11,9 +11,19 @@ REST API. One-command install.
 
 ## Install (Ubuntu 22.04 / 24.04)
 
+This is a **private repo**, so the installer needs a GitHub token — a
+fine-grained PAT with read access to `fabianodebei/modemproxy`, or a classic
+PAT with the `repo` scope:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fabianodebei/modemproxy/main/install.sh | sudo bash
+TOKEN=ghp_xxx   # your GitHub PAT
+curl -fsSL -H "Authorization: token $TOKEN" \
+  https://raw.githubusercontent.com/fabianodebei/modemproxy/main/install.sh \
+  | sudo MODEMPROXY_TOKEN=$TOKEN bash
 ```
+
+The token is used only to fetch the source and is **not** persisted in
+`.git/config`.
 
 The installer pulls dependencies (ModemManager, libqmi/libmbim, 3proxy),
 creates a venv under `/opt/modemproxy`, writes `/etc/modemproxy/config.yaml`
