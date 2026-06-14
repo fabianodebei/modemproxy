@@ -140,6 +140,13 @@ def apply_port(imei: str, **alloc_kwargs) -> dict:
                                  int(modem["rt_table"]))
         except Exception:
             pass
+    # Anti-tethering TTL on this modem's egress interface (no-op if disabled).
+    if modem.get("iface"):
+        try:
+            from ..services import ttl
+            ttl.ensure_ttl(modem["iface"])
+        except Exception:
+            pass
     name = modem.get("name") or imei[-6:]
     _systemctl("enable", f"modemproxy-proxy@{name}.service")
     _systemctl("restart", f"modemproxy-proxy@{name}.service")

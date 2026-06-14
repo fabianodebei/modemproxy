@@ -76,6 +76,28 @@ class Config:
     alert_expiry_days: int = 7             # warn this many days before a port expires
     alert_mute_minutes: int = 3           # skip identical alerts within this window
 
+    # Net-mode dongle / router web UI
+    default_hilink_password: str = ""     # admin password for ZTE/Huawei web API
+
+    # Anti-tethering: rewrite egress TTL so the carrier can't spot tethering
+    custom_ttl: int = 0                    # 0 = off; typical value 65
+
+    # IP rotation quality
+    rotation_retry: bool = True
+    rotation_max_retry: int = 3            # retries when IP unchanged/missing
+    rotation_unique: bool = True           # require a different IP than before
+    rotation_min_interval: int = 0         # ignore rotate calls within N seconds
+    rotation_dirty: bool = False           # skip post-checks (fast, no retry)
+
+    # Modem auto-reboot (failure scoring)
+    autoreboot_enable: bool = False
+    autoreboot_max_score: int = 100        # reboot when score reaches this
+    autoreboot_window: int = 3600          # score accumulates within N seconds
+    autoreboot_min_uptime: int = 1800      # only reboot modems up longer than this
+    score_rotation_fail: int = 10
+    score_ip_not_detected: int = 10
+    score_offline: int = 20
+
     # Database
     db_path: str = str(STATE_DIR / "modemproxy.db")
 

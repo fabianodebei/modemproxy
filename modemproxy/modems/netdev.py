@@ -14,6 +14,8 @@ public IP through the dongle's own web API.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import ipaddress
 import json
 import subprocess
@@ -23,6 +25,7 @@ from typing import Any
 import httpx
 
 from .. import db
+from ..config import get_config
 
 # Drivers used by net-mode dongles (NOT the QMI/MBIM control drivers, which
 # ModemManager handles itself).
@@ -371,12 +374,44 @@ def rotate(modem: dict[str, Any]) -> str | None:
     return public_ip(iface)
 
 
-def _rotate_zte(host: str) -> bool:
-    """ZTE goform: disconnect then connect the data network."""
-    base = f"http://{host}/goform/goform_set_cmd_process"
-    headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+def _zte_client(host: str) -> httpx.Client:
+    """Authenticated httpx client for ZTE goform set-commands.
+
+    Set commands (rotation, reboot) on CPE like the MC801A require a login
+    session. Status/get commands usually don't. Uses the configured HiLink
+    admin password; falls back to an unauthenticated client if none is set.
+    """
+    c = httpx.Client(timeout=8.0, headers={
+        "Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"})
+    pw = get_config().default_hilink_password
+    if not pw:
+        return c
+    base = f"http://{host}/goform"
     try:
-        with httpx.Client(timeout=8.0, headers=headers) as c:
+        # ZTE LD-challenge: final = SHA256( SHA256(pw)_UPPER + LD )_UPPER
+        ld = ""
+        r = c.get(f"{base}/goform_get_cmd_process?isTest=false&cmd=LD")
+        try:
+            ld = r.json().get("LD", "")
+        except ValueError:
+            ld = ""
+        if ld:
+            h1 = hashlib.sha256(pw.encode()).hexdigest().upper()
+            pwd = hashlib.sha256((h1 + ld).encode()).hexdigest().upper()
+        else:
+            pwd = base64.b64encode(pw.encode()).decode()
+        c.post(f"{base}/goform_set_cmd_process",
+               data={"isTest": "false", "goformId": "LOGIN", "password": pwd})
+    except httpx.HTTPError:
+        pass
+    return c
+
+
+def _rotate_zte(host: str) -> bool:
+    """ZTE goform: disconnect then connect the data network (authed)."""
+    base = f"http://{host}/goform/goform_set_cmd_process"
+    try:
+        with _zte_client(host) as c:
             r1 = c.post(base, data={"isTest": "false", "goformId": "DISCONNECT_NETWORK"})
             if r1.status_code >= 400:
                 return False
@@ -384,6 +419,17 @@ def _rotate_zte(host: str) -> bool:
             time.sleep(2)
             c.post(base, data={"isTest": "false", "goformId": "CONNECT_NETWORK"})
         return True
+    except httpx.HTTPError:
+        return False
+
+
+def reboot_zte(host: str) -> bool:
+    """Reboot a ZTE dongle/router via the web API (authed)."""
+    try:
+        with _zte_client(host) as c:
+            r = c.post(f"http://{host}/goform/goform_set_cmd_process",
+                       data={"isTest": "false", "goformId": "REBOOT_DEVICE"})
+            return r.status_code < 400
     except httpx.HTTPError:
         return False
 

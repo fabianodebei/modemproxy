@@ -218,11 +218,18 @@ def settings_page(request: Request, user: str = Depends(ui_auth)):
                 "alert_proxy_down": cfg.alert_proxy_down, "alert_expiry": cfg.alert_expiry,
                 "alert_expiry_days": cfg.alert_expiry_days,
                 "alert_mute_minutes": cfg.alert_mute_minutes}
+    advanced = {"default_hilink_password": cfg.default_hilink_password,
+                "custom_ttl": cfg.custom_ttl, "rotation_retry": cfg.rotation_retry,
+                "rotation_max_retry": cfg.rotation_max_retry,
+                "rotation_unique": cfg.rotation_unique,
+                "rotation_min_interval": cfg.rotation_min_interval,
+                "autoreboot_enable": cfg.autoreboot_enable,
+                "autoreboot_max_score": cfg.autoreboot_max_score}
     return templates.TemplateResponse(
         request, "settings.html",
         {"user": user, "keys": db.api_key_list(),
          "access": access, "publish": publish.status(),
-         "branding": branding, "alerting": alerting},
+         "branding": branding, "alerting": alerting, "advanced": advanced},
     )
 
 
@@ -499,7 +506,11 @@ async def api_settings_update(request: Request, _: str = Depends(admin_auth)):
     allowed = {"brand_name", "company_name", "company_url", "creds_style",
                "tg_alerts_enable", "tg_bot_token", "tg_chat_id",
                "alert_rotation_ok", "alert_rotation_fail", "alert_proxy_down",
-               "alert_expiry", "alert_expiry_days", "alert_mute_minutes"}
+               "alert_expiry", "alert_expiry_days", "alert_mute_minutes",
+               "default_hilink_password", "custom_ttl", "rotation_retry",
+               "rotation_max_retry", "rotation_unique", "rotation_min_interval",
+               "rotation_dirty", "autoreboot_enable", "autoreboot_max_score",
+               "autoreboot_window", "autoreboot_min_uptime"}
     updates = {k: v for k, v in (body or {}).items() if k in allowed}
     update_config(updates)
     return {"ok": True}

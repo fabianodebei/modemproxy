@@ -56,11 +56,15 @@ def discover() -> list[dict[str, Any]]:
     except Exception:  # discovery of net dongles must never break mm discovery
         pass
 
-    # Alert on proxies that should be up but went offline.
+    # Alert + score proxies that should be up but went offline.
     try:
+        cfg = get_config()
         for m in db.list_modems():
             if m.get("enabled") and m.get("http_port") and m.get("status") == "offline":
                 alerts.proxy_down(m["imei"], m.get("name") or m["imei"][-6:])
+                if cfg.autoreboot_enable:
+                    from ..services import autoreboot
+                    autoreboot.record(m["imei"], cfg.score_offline)
     except Exception:
         pass
     return results
@@ -84,27 +88,57 @@ def _mm_id_for(imei: str) -> str | None:
     return None
 
 
+def _reconnect_once(imei: str, old: dict[str, Any]) -> str | None:
+    """Trigger one reconnect and return the resulting public IP."""
+    if old.get("kind") == "netdev":
+        return netdev.rotate(old)
+    mid = _mm_id_for(imei)
+    if not mid:
+        raise control.MMError(f"modem {imei} not present")
+    control.reconnect(mid)
+    time.sleep(3)
+    return control_safe_ip(mid)
+
+
 def rotate(imei: str, reason: str = "manual") -> dict[str, Any]:
-    """Force a new public IP for one modem by reconnecting its data link."""
+    """Force a new public IP, with optional retry until the IP actually changes."""
+    cfg = get_config()
     old = db.get_modem(imei)
     old_ip = old.get("ip") if old else None
     name = (old or {}).get("name") or imei[-6:]
+
+    # Rate-limit: skip if rotated too recently.
+    if cfg.rotation_min_interval > 0:
+        last = db.rotation_log(imei, limit=1)
+        if last and (db.now() - last[0]["ts"]) < cfg.rotation_min_interval:
+            return {"imei": imei, "old_ip": old_ip, "new_ip": old_ip, "skipped": "min_interval"}
+
+    attempts = 1 if cfg.rotation_dirty or not cfg.rotation_retry else max(1, cfg.rotation_max_retry)
+    new_ip = None
     try:
-        if old and old.get("kind") == "netdev":
-            new_ip = netdev.rotate(old)
-        else:
-            mid = _mm_id_for(imei)
-            if not mid:
-                raise control.MMError(f"modem {imei} not present")
-            control.reconnect(mid)
-            time.sleep(3)
-            new_ip = control_safe_ip(mid)
+        for _ in range(attempts):
+            new_ip = _reconnect_once(imei, old or {})
+            if cfg.rotation_dirty:
+                break
+            ok = bool(new_ip) and (not cfg.rotation_unique or new_ip != old_ip)
+            if ok:
+                break
     except Exception as e:
         alerts.rotation_fail(imei, name, str(e))
+        if cfg.autoreboot_enable:
+            from ..services import autoreboot
+            autoreboot.record(imei, cfg.score_rotation_fail)
         raise
+
     db.upsert_modem(imei, ip=new_ip, last_seen=db.now())
     db.log_rotation(imei, old_ip, new_ip, reason)
-    alerts.rotation_ok(imei, name, old_ip, new_ip)
+    if not new_ip and cfg.autoreboot_enable:
+        from ..services import autoreboot
+        autoreboot.record(imei, cfg.score_ip_not_detected)
+    if cfg.rotation_unique and new_ip and new_ip == old_ip:
+        alerts.rotation_fail(imei, name, f"IP unchanged after {attempts} tries ({new_ip})")
+    else:
+        alerts.rotation_ok(imei, name, old_ip, new_ip)
     return {"imei": imei, "old_ip": old_ip, "new_ip": new_ip}
 
 

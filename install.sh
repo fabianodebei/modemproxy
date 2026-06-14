@@ -178,6 +178,20 @@ tg_alerts_enable: false
 tg_bot_token: ""
 tg_chat_id: ""
 alert_expiry_days: 7
+
+# --- Net-mode router auth / anti-tethering / rotation quality -----------
+default_hilink_password: ""   # ZTE/Huawei web admin password (rotation auth)
+custom_ttl: 0                 # set 65 to hide tethering from the carrier
+rotation_retry: true
+rotation_max_retry: 3
+rotation_unique: true
+rotation_min_interval: 0
+
+# --- Modem auto-reboot (failure scoring) -------------------------------
+autoreboot_enable: false
+autoreboot_max_score: 100
+autoreboot_window: 3600
+autoreboot_min_uptime: 1800
 EOF
     GENERATED_PW="$PW"
 fi

@@ -137,6 +137,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE modems ADD COLUMN rt_table INTEGER")
     if "manual" not in mcols:
         conn.execute("ALTER TABLE modems ADD COLUMN manual INTEGER DEFAULT 0")
+    if "reboot_score" not in mcols:
+        conn.execute("ALTER TABLE modems ADD COLUMN reboot_score INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE modems ADD COLUMN score_window_start INTEGER")
 
 
 @contextmanager

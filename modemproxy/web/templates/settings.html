@@ -138,6 +138,36 @@
   </div>
 </div>
 
+<div x-data="advanced()" class="max-w-2xl mb-6">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <h2 class="text-sm font-medium text-slate-200 mb-4">Mobile / advanced</h2>
+    <div class="space-y-3">
+      <label class="block text-xs text-slate-400">HiLink admin password (ZTE/Huawei web API — needed for rotation on CPE like MC801A)
+        <input x-model="default_hilink_password" type="password"
+               class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm font-mono">
+      </label>
+      <label class="block text-xs text-slate-400">Egress TTL (0 = off; 65 hides tethering from the carrier)
+        <input type="number" x-model.number="custom_ttl"
+               class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+      </label>
+      <div class="grid grid-cols-2 gap-2 text-xs text-slate-300">
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="rotation_retry"> retry rotation</label>
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="rotation_unique"> require new IP</label>
+        <label class="block text-slate-400">max retries
+          <input type="number" x-model.number="rotation_max_retry" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-2 py-1 text-sm"></label>
+        <label class="block text-slate-400">min interval (s)
+          <input type="number" x-model.number="rotation_min_interval" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-2 py-1 text-sm"></label>
+      </div>
+      <label class="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" x-model="autoreboot_enable"> auto-reboot on faults (score ≥
+        <input type="number" x-model.number="autoreboot_max_score" class="w-16 bg-ink-700 border border-ink-600 rounded px-2 py-0.5 text-sm">)</label>
+    </div>
+    <div class="mt-4 flex items-center gap-3">
+      <button @click="save()" :disabled="busy" class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-4 py-1.5 text-sm">Save</button>
+      <span x-show="saved" x-cloak class="text-xs text-emerald-300">Saved ✓</span>
+    </div>
+  </div>
+</div>
+
 <div x-data="keys()" x-init="init()" class="max-w-2xl">
   <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
     <div class="flex items-center justify-between mb-4">
@@ -191,6 +221,25 @@
 </div>
 
 <script>
+function advanced(){
+  const a = {{ advanced | tojson }};
+  return {
+    default_hilink_password:a.default_hilink_password||'', custom_ttl:a.custom_ttl||0,
+    rotation_retry:a.rotation_retry, rotation_unique:a.rotation_unique,
+    rotation_max_retry:a.rotation_max_retry||3, rotation_min_interval:a.rotation_min_interval||0,
+    autoreboot_enable:a.autoreboot_enable, autoreboot_max_score:a.autoreboot_max_score||100,
+    busy:false, saved:false, _t:null,
+    async save(){ this.busy=true; this.saved=false;
+      try{ await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({default_hilink_password:this.default_hilink_password,
+          custom_ttl:this.custom_ttl,rotation_retry:this.rotation_retry,
+          rotation_unique:this.rotation_unique,rotation_max_retry:this.rotation_max_retry,
+          rotation_min_interval:this.rotation_min_interval,autoreboot_enable:this.autoreboot_enable,
+          autoreboot_max_score:this.autoreboot_max_score})});
+        this.saved=true; clearTimeout(this._t); this._t=setTimeout(()=>this.saved=false,3000);
+      } finally { this.busy=false; } },
+  }
+}
 function branding(){
   const b = {{ branding | tojson }};
   return {
