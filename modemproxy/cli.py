@@ -233,6 +233,43 @@ def cmd_alert_test(args) -> int:
     return 0 if ok else 1
 
 
+def cmd_customer_create(args) -> int:
+    from .services import customers
+    customers.create(args.username, args.password, label=args.label or "")
+    print(f"customer {args.username} created")
+    return 0
+
+
+def cmd_customer_passwd(args) -> int:
+    from .services import customers
+    customers.set_password(args.username, args.password)
+    print("password updated")
+    return 0
+
+
+def cmd_customer_list(args) -> int:
+    _print_json(db.customer_list())
+    return 0
+
+
+def cmd_customer_delete(args) -> int:
+    db.customer_delete(args.username)
+    print("deleted")
+    return 0
+
+
+def cmd_customer_assign(args) -> int:
+    db.customer_assign(args.username, args.imei)
+    print(f"{args.imei} -> {args.username}")
+    return 0
+
+
+def cmd_customer_unassign(args) -> int:
+    db.customer_unassign(args.username, args.imei)
+    print("unassigned")
+    return 0
+
+
 def cmd_add_netdev(args) -> int:
     from .modems import netdev
     info = netdev.register_manual(
@@ -375,6 +412,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
 
     add("alert-test", cmd_alert_test, "send a test Telegram alert")
+
+    sp = add("customer-create", cmd_customer_create, "create a user-panel customer")
+    sp.add_argument("username"); sp.add_argument("password"); sp.add_argument("--label")
+    sp = add("customer-passwd", cmd_customer_passwd, "set a customer's password")
+    sp.add_argument("username"); sp.add_argument("password")
+    add("customer-list", cmd_customer_list, "list customers")
+    sp = add("customer-delete", cmd_customer_delete, "delete a customer")
+    sp.add_argument("username")
+    sp = add("customer-assign", cmd_customer_assign, "assign a modem to a customer")
+    sp.add_argument("username"); sp.add_argument("imei")
+    sp = add("customer-unassign", cmd_customer_unassign, "remove a modem from a customer")
+    sp.add_argument("username"); sp.add_argument("imei")
 
     sp = add("add-netdev", cmd_add_netdev, "register a LAN 4G/5G router (cabled ethernet) as a modem")
     sp.add_argument("iface", help="network interface the router is cabled to, e.g. eth1")

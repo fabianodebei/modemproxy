@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ brand().name }} · My proxies{% endblock %}
+{% block body %}
+<div class="min-h-screen" x-data="panel()">
+  <header class="border-b border-ink-700 bg-ink-800/60">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="font-semibold tracking-tight">{{ brand().name }}</span>
+        <span class="text-xs text-slate-500">customer area</span>
+      </div>
+      <div class="flex items-center gap-3 text-sm">
+        <span class="text-slate-400">{{ customer }}</span>
+        <a href="/panel/logout" class="text-slate-400 hover:text-slate-200">Sign out</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <h1 class="text-lg font-semibold mb-4">My proxies</h1>
+
+    {% if not proxies %}
+    <p class="text-slate-500 text-sm">No proxies assigned yet.</p>
+    {% else %}
+    <div class="grid gap-3 sm:grid-cols-2">
+      {% for p in proxies %}
+      <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="font-medium">{{ p.name }}</div>
+          <span class="text-xs px-2 py-0.5 rounded-full
+            {% if p.status == 'online' %}bg-emerald-500/15 text-emerald-300
+            {% elif p.status == 'expired' %}bg-amber-500/15 text-amber-300
+            {% else %}bg-red-500/15 text-red-300{% endif %}">{{ p.status or 'unknown' }}</span>
+        </div>
+        <div class="text-xs text-slate-400 space-y-1">
+          <div>Operator: <span class="text-slate-300">{{ p.operator or '—' }}</span>
+               · Signal: <span class="text-slate-300">{{ p.signal if p.signal is not none else '—' }}%</span></div>
+          <div>Public IP: <span class="text-slate-300 font-mono">{{ p.ip or '—' }}</span></div>
+          <div>Today: <span class="text-slate-300">{{ p.today_bytes | bytes }}</span>
+               · Month: <span class="text-slate-300">{{ p.month_bytes | bytes }}</span></div>
+          {% if p.days_left is not none %}
+          <div>Expires in: <span class="text-slate-300">{{ p.days_left }} day(s)</span></div>
+          {% endif %}
+        </div>
+
+        <div class="mt-3 space-y-1">
+          {% if brand().creds_style == 'curl' %}
+          <div class="font-mono text-xs bg-ink-900/60 rounded-lg px-2 py-1 flex items-center justify-between">
+            <span class="truncate">{{ p.http }}</span>
+            <button @click="copy('{{ p.http }}')" class="text-brand-400 ml-2">copy</button>
+          </div>
+          {% else %}
+          <div class="font-mono text-xs bg-ink-900/60 rounded-lg px-2 py-1 flex items-center justify-between">
+            <span class="truncate">HTTP {{ p.host }}:{{ p.http_port }}</span>
+            <button @click="copy('{{ p.host }}:{{ p.http_port }}')" class="text-brand-400 ml-2">copy</button>
+          </div>
+          <div class="font-mono text-xs bg-ink-900/60 rounded-lg px-2 py-1 flex items-center justify-between">
+            <span class="truncate">SOCKS5 {{ p.host }}:{{ p.socks_port }}</span>
+            <button @click="copy('{{ p.host }}:{{ p.socks_port }}')" class="text-brand-400 ml-2">copy</button>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="mt-3 flex items-center gap-2">
+          <button @click="rotate('{{ p.imei }}')" :disabled="busy=='{{ p.imei }}'"
+                  class="bg-brand-500 hover:bg-brand-600 text-white text-xs rounded-lg px-3 py-1.5">
+            <span x-show="busy!='{{ p.imei }}'">Rotate IP</span>
+            <span x-show="busy=='{{ p.imei }}'" x-cloak>Rotating…</span>
+          </button>
+          <span x-show="msg['{{ p.imei }}']" x-cloak class="text-xs text-emerald-300" x-text="msg['{{ p.imei }}']"></span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </main>
+
+  <div x-show="toast" x-cloak x-transition style="display:none"
+       class="fixed bottom-5 right-5 z-50 bg-ink-700 border border-ink-600 rounded-xl px-4 py-3 text-sm shadow-xl">
+    <span x-text="toast"></span>
+  </div>
+</div>
+
+<script>
+function panel(){
+  return {
+    busy:'', msg:{}, toast:'',
+    notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2000); },
+    copy(t){ navigator.clipboard.writeText(t); this.notify('Copied'); },
+    async rotate(imei){ this.busy=imei;
+      try{ const r=await fetch('/panel/rotate/'+encodeURIComponent(imei),{method:'POST'});
+        const j=await r.json();
+        if(r.ok){ this.msg[imei]='new IP: '+(j.new_ip||'?'); setTimeout(()=>location.reload(),1500); }
+        else { this.msg[imei]='error'; }
+      } catch(e){ this.msg[imei]='error'; }
+      finally{ this.busy=''; } },
+  }
+}
+</script>
+{% endblock %}

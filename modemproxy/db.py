@@ -53,6 +53,19 @@ CREATE TABLE IF NOT EXISTS alert_log (
     ts              INTEGER              -- last time this alert was sent
 );
 
+CREATE TABLE IF NOT EXISTS customers (
+    username        TEXT PRIMARY KEY,    -- customer login
+    password_hash   TEXT,                -- pbkdf2 hash
+    label           TEXT,                -- human note / company
+    created_at      INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS customer_modems (
+    username        TEXT REFERENCES customers(username) ON DELETE CASCADE,
+    imei            TEXT REFERENCES modems(imei) ON DELETE CASCADE,
+    PRIMARY KEY (username, imei)
+);
+
 CREATE TABLE IF NOT EXISTS bandwidth (
     imei            TEXT REFERENCES modems(imei) ON DELETE CASCADE,
     ts              INTEGER,
@@ -307,6 +320,64 @@ def alert_should_send(akey: str, mute_seconds: int) -> bool:
             (akey, t),
         )
     return True
+
+
+def customer_upsert(username: str, password_hash: str | None = None,
+                    label: str | None = None) -> None:
+    with db() as conn:
+        r = conn.execute("SELECT username FROM customers WHERE username=?", (username,)).fetchone()
+        if r:
+            sets, vals = [], []
+            if password_hash is not None:
+                sets.append("password_hash=?"); vals.append(password_hash)
+            if label is not None:
+                sets.append("label=?"); vals.append(label)
+            if sets:
+                conn.execute(f"UPDATE customers SET {', '.join(sets)} WHERE username=?",
+                             (*vals, username))
+        else:
+            conn.execute(
+                "INSERT INTO customers (username, password_hash, label, created_at) "
+                "VALUES (?,?,?,?)", (username, password_hash or "", label or "", now()))
+
+
+def customer_get(username: str) -> dict[str, Any] | None:
+    with db() as conn:
+        r = conn.execute("SELECT * FROM customers WHERE username=?", (username,)).fetchone()
+        return dict(r) if r else None
+
+
+def customer_list() -> list[dict[str, Any]]:
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT c.username, c.label, c.created_at, "
+            "(SELECT COUNT(*) FROM customer_modems cm WHERE cm.username=c.username) AS modems "
+            "FROM customers c ORDER BY c.username").fetchall()
+        return [dict(r) for r in rows]
+
+
+def customer_delete(username: str) -> None:
+    with db() as conn:
+        conn.execute("DELETE FROM customers WHERE username=?", (username,))
+
+
+def customer_assign(username: str, imei: str) -> None:
+    with db() as conn:
+        conn.execute("INSERT OR IGNORE INTO customer_modems (username, imei) VALUES (?,?)",
+                     (username, imei))
+
+
+def customer_unassign(username: str, imei: str) -> None:
+    with db() as conn:
+        conn.execute("DELETE FROM customer_modems WHERE username=? AND imei=?",
+                     (username, imei))
+
+
+def customer_imeis(username: str) -> list[str]:
+    with db() as conn:
+        rows = conn.execute("SELECT imei FROM customer_modems WHERE username=?",
+                            (username,)).fetchall()
+        return [r["imei"] for r in rows]
 
 
 def log_rotation(imei: str, old_ip: str | None, new_ip: str | None, reason: str) -> None:

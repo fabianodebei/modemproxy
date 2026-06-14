@@ -138,6 +138,53 @@
   </div>
 </div>
 
+<div x-data="custs()" x-init="init()" class="max-w-2xl mb-6">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-sm font-medium text-slate-200">Customers</h2>
+        <p class="text-xs text-slate-500">Accounts for the user panel at <code>/panel</code>.</p>
+      </div>
+      <div class="flex gap-2">
+        <input x-model="nu" placeholder="username" class="w-28 bg-ink-700 border border-ink-600 rounded-lg px-2 py-1.5 text-sm">
+        <input x-model="np" placeholder="password" class="w-28 bg-ink-700 border border-ink-600 rounded-lg px-2 py-1.5 text-sm">
+        <button @click="create()" class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-3 py-1.5 text-sm">Add</button>
+      </div>
+    </div>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-ink-700">
+        <template x-if="list.length===0"><tr><td class="py-4 text-center text-slate-500">No customers.</td></tr></template>
+        <template x-for="c in list" :key="c.username">
+          <tr>
+            <td class="py-2 align-top">
+              <div class="font-medium" x-text="c.username"></div>
+              <div class="text-xs text-slate-500" x-text="c.label"></div>
+              <div class="mt-1 flex flex-wrap gap-1">
+                <template x-for="im in c.imeis" :key="im">
+                  <span class="text-xs bg-ink-700 rounded px-1.5 py-0.5 flex items-center gap-1">
+                    <span x-text="nameOf(im)"></span>
+                    <button @click="unassign(c.username,im)" class="text-red-400">×</button>
+                  </span>
+                </template>
+              </div>
+            </td>
+            <td class="py-2 text-right align-top">
+              <select @change="assign(c.username,$event.target.value); $event.target.value=''"
+                      class="bg-ink-700 border border-ink-600 rounded-lg px-2 py-1 text-xs">
+                <option value="">assign modem…</option>
+                <template x-for="m in modems" :key="m.imei">
+                  <option :value="m.imei" x-text="m.name"></option>
+                </template>
+              </select>
+              <button @click="del(c.username)" class="ml-2 text-red-400 hover:text-red-300 text-xs">Delete</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <div x-data="advanced()" class="max-w-2xl mb-6">
   <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
     <h2 class="text-sm font-medium text-slate-200 mb-4">Mobile / advanced</h2>
@@ -221,6 +268,23 @@
 </div>
 
 <script>
+function custs(){
+  return {
+    list: {{ customers | tojson }}, modems: {{ all_modems | tojson }}, nu:'', np:'',
+    init(){},
+    nameOf(im){ const m=this.modems.find(x=>x.imei===im); return m?m.name:im; },
+    async refresh(){ this.list=await (await fetch('/api/customers')).json(); },
+    async create(){ if(!this.nu||!this.np)return;
+      await fetch('/api/customers',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({username:this.nu,password:this.np})});
+      this.nu=''; this.np=''; await this.refresh(); },
+    async del(u){ await fetch('/api/customers/'+encodeURIComponent(u),{method:'DELETE'}); await this.refresh(); },
+    async assign(u,im){ if(!im)return;
+      await fetch('/api/customers/'+encodeURIComponent(u)+'/assign',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({imei:im})}); await this.refresh(); },
+    async unassign(u,im){ await fetch('/api/customers/'+encodeURIComponent(u)+'/assign/'+encodeURIComponent(im),{method:'DELETE'}); await this.refresh(); },
+  }
+}
 function advanced(){
   const a = {{ advanced | tojson }};
   return {

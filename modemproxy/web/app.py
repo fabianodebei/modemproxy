@@ -135,12 +135,13 @@ def admin_auth(request: Request) -> str:
 
 
 class _RedirectToLogin(Exception):
-    pass
+    def __init__(self, path: str = "/login"):
+        self.path = path
 
 
 @app.exception_handler(_RedirectToLogin)
 async def _redirect_login(request: Request, exc: _RedirectToLogin):
-    return RedirectResponse("/login", status_code=303)
+    return RedirectResponse(exc.path, status_code=303)
 
 
 # --- login -----------------------------------------------------------------
@@ -225,11 +226,18 @@ def settings_page(request: Request, user: str = Depends(ui_auth)):
                 "rotation_min_interval": cfg.rotation_min_interval,
                 "autoreboot_enable": cfg.autoreboot_enable,
                 "autoreboot_max_score": cfg.autoreboot_max_score}
+    custs = []
+    for c in db.customer_list():
+        c["imeis"] = db.customer_imeis(c["username"])
+        custs.append(c)
+    all_modems = [{"imei": m["imei"], "name": m.get("name") or m["imei"][-6:]}
+                  for m in db.list_modems() if m.get("http_port")]
     return templates.TemplateResponse(
         request, "settings.html",
         {"user": user, "keys": db.api_key_list(),
          "access": access, "publish": publish.status(),
-         "branding": branding, "alerting": alerting, "advanced": advanced},
+         "branding": branding, "alerting": alerting, "advanced": advanced,
+         "customers": custs, "all_modems": all_modems},
     )
 
 
@@ -242,6 +250,54 @@ def activity_page(request: Request, user: str = Depends(ui_auth)):
     return templates.TemplateResponse(
         request, "activity.html", {"user": user, "log": log},
     )
+
+
+# --- Customer user panel ---------------------------------------------------
+
+def customer_auth(request: Request) -> str:
+    cust = request.session.get("customer")
+    if not cust:
+        raise _RedirectToLogin("/panel/login")
+    return cust
+
+
+@app.get("/panel/login", response_class=HTMLResponse)
+def panel_login(request: Request):
+    return templates.TemplateResponse(request, "panel_login.html", {"error": None})
+
+
+@app.post("/panel/login", response_class=HTMLResponse)
+async def panel_login_post(request: Request, username: str = Form(...), password: str = Form(...)):
+    from ..services import customers
+    if customers.authenticate(username, password):
+        request.session["customer"] = username
+        return RedirectResponse("/panel", status_code=303)
+    return templates.TemplateResponse(request, "panel_login.html",
+                                      {"error": "Invalid credentials"}, status_code=401)
+
+
+@app.get("/panel/logout")
+def panel_logout(request: Request):
+    request.session.pop("customer", None)
+    return RedirectResponse("/panel/login", status_code=303)
+
+
+@app.get("/panel", response_class=HTMLResponse)
+def panel_home(request: Request, cust: str = Depends(customer_auth)):
+    from ..services import customers
+    return templates.TemplateResponse(
+        request, "panel.html",
+        {"customer": cust, "proxies": customers.proxies_for(cust)})
+
+
+@app.post("/panel/rotate/{imei}")
+def panel_rotate(imei: str, request: Request, cust: str = Depends(customer_auth)):
+    if imei not in db.customer_imeis(cust):
+        raise HTTPException(403, "not your proxy")
+    try:
+        return manager.rotate(imei, reason="customer")
+    except Exception as e:
+        raise HTTPException(400, str(e))
 
 
 # --- JSON API --------------------------------------------------------------
@@ -496,6 +552,48 @@ async def api_access_update(request: Request, _: str = Depends(admin_auth)):
     update_config(updates)
     result = publish.sync()
     return {"ok": True, "sync": result, "status": publish.status()}
+
+
+@app.get("/api/customers")
+def api_customers_list(_: str = Depends(admin_auth)):
+    out = []
+    for c in db.customer_list():
+        c["imeis"] = db.customer_imeis(c["username"])
+        out.append(c)
+    return out
+
+
+@app.post("/api/customers")
+async def api_customers_create(request: Request, _: str = Depends(admin_auth)):
+    from ..services import customers
+    body = await request.json() if await request.body() else {}
+    u, p = (body or {}).get("username"), (body or {}).get("password")
+    if not u or not p:
+        raise HTTPException(400, "username and password required")
+    customers.create(u, p, label=(body or {}).get("label", ""))
+    return {"ok": True}
+
+
+@app.delete("/api/customers/{username}")
+def api_customers_delete(username: str, _: str = Depends(admin_auth)):
+    db.customer_delete(username)
+    return {"ok": True}
+
+
+@app.post("/api/customers/{username}/assign")
+async def api_customers_assign(username: str, request: Request, _: str = Depends(admin_auth)):
+    body = await request.json() if await request.body() else {}
+    imei = (body or {}).get("imei")
+    if not imei:
+        raise HTTPException(400, "imei required")
+    db.customer_assign(username, imei)
+    return {"ok": True}
+
+
+@app.delete("/api/customers/{username}/assign/{imei}")
+def api_customers_unassign(username: str, imei: str, _: str = Depends(admin_auth)):
+    db.customer_unassign(username, imei)
+    return {"ok": True}
 
 
 @app.post("/api/settings")
