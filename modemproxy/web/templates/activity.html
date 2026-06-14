@@ -1,0 +1,37 @@
+{% extends "app_base.html" %}
+{% set active = 'activity' %}
+{% block title %}Activity · modemproxy{% endblock %}
+{% block page_title %}Rotation activity{% endblock %}
+
+{% block main %}
+<div class="bg-ink-800 border border-ink-700 rounded-2xl overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="text-xs uppercase text-slate-500 border-b border-ink-700">
+      <tr>
+        <th class="text-left font-medium px-5 py-3">Time</th>
+        <th class="text-left font-medium px-5 py-3">Modem</th>
+        <th class="text-left font-medium px-5 py-3">Old IP</th>
+        <th class="text-left font-medium px-5 py-3">New IP</th>
+        <th class="text-left font-medium px-5 py-3">Reason</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-ink-700">
+      {% if not log %}
+      <tr><td colspan="5" class="px-5 py-10 text-center text-slate-500">
+        No rotations logged yet.</td></tr>
+      {% endif %}
+      {% for r in log %}
+      <tr class="hover:bg-ink-700/40">
+        <td class="px-5 py-3 font-mono text-xs text-slate-400">{{ r.ts | ts }}</td>
+        <td class="px-5 py-3 font-medium">{{ r.name }}</td>
+        <td class="px-5 py-3 font-mono text-xs text-slate-500">{{ r.old_ip or '—' }}</td>
+        <td class="px-5 py-3 font-mono text-xs text-emerald-400">{{ r.new_ip or '—' }}</td>
+        <td class="px-5 py-3">
+          <span class="text-xs px-2 py-1 rounded-full bg-ink-700 text-slate-300">{{ r.reason }}</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

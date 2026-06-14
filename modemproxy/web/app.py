@@ -46,7 +46,16 @@ def _humanbytes(n) -> str:
     return f"{n:.1f} TB"
 
 
+def _ts(epoch) -> str:
+    import datetime as _dt
+    try:
+        return _dt.datetime.fromtimestamp(int(epoch)).strftime("%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return "—"
+
+
 templates.env.filters["bytes"] = _humanbytes
+templates.env.filters["ts"] = _ts
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
 
 
@@ -142,6 +151,25 @@ def bandwidth_page(request: Request, user: str = Depends(ui_auth)):
         request, "bandwidth.html",
         {"user": user, "modems": db.list_modems(),
          "bw": bandwidth.report()},
+    )
+
+
+@app.get("/pool", response_class=HTMLResponse)
+def pool_page(request: Request, user: str = Depends(ui_auth)):
+    return templates.TemplateResponse(
+        request, "pool.html",
+        {"user": user, "proxies": _live_proxies(request)},
+    )
+
+
+@app.get("/activity", response_class=HTMLResponse)
+def activity_page(request: Request, user: str = Depends(ui_auth)):
+    names = {m["imei"]: (m.get("name") or m["imei"]) for m in db.list_modems()}
+    log = db.rotation_log(limit=200)
+    for r in log:
+        r["name"] = names.get(r["imei"], r["imei"])
+    return templates.TemplateResponse(
+        request, "activity.html", {"user": user, "log": log},
     )
 
 

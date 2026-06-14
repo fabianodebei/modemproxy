@@ -23,6 +23,16 @@
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
         Bandwidth
       </a>
+      <a href="/pool" class="flex items-center gap-3 px-3 py-2 rounded-lg
+         {{ 'bg-brand-500/15 text-brand-300' if nav=='pool' else 'text-slate-400 hover:bg-ink-700 hover:text-slate-200' }}">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
+        Pool
+      </a>
+      <a href="/activity" class="flex items-center gap-3 px-3 py-2 rounded-lg
+         {{ 'bg-brand-500/15 text-brand-300' if nav=='activity' else 'text-slate-400 hover:bg-ink-700 hover:text-slate-200' }}">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        Activity
+      </a>
     </nav>
     <div class="mt-auto p-3 border-t border-ink-700">
       <a href="/logout" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-ink-700 hover:text-slate-200">

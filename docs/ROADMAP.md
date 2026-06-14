@@ -27,11 +27,11 @@ Status of feature parity with a full commercial modem-proxy manager.
 - Sticky sessions — `/api/pool/sticky/{key}` pins a key to one live modem for a
   TTL window
 - Prometheus `/metrics` — pool health + per-modem signal, online, month traffic
+- Web panel: Pool page (live proxies + copy) and Activity page (rotation log)
 
 ## Next
 - **OpenVPN per-modem export** — download a client config per modem (needs a
   per-modem OpenVPN server on the box).
-- **Web: rotation log + pool views** — surface history and the pool in the UI.
 
 ## Later
 - OS/TCP fingerprint spoofing layer (p0f / osfooler)

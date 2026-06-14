@@ -1,0 +1,54 @@
+{% extends "app_base.html" %}
+{% set active = 'pool' %}
+{% block title %}Pool · modemproxy{% endblock %}
+{% block page_title %}Allocation pool{% endblock %}
+
+{% block main %}
+<div x-data="{ copy(t){ navigator.clipboard.writeText(t); this.toast='Copied'; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',1500); }, toast:'' }">
+
+  <p class="text-sm text-slate-400 mb-4">
+    {{ proxies|length }} live prox{{ 'y' if proxies|length==1 else 'ies' }} ·
+    API: <code class="text-slate-300">/api/pool</code>,
+    <code class="text-slate-300">/api/pool/random</code>,
+    <code class="text-slate-300">/api/pool/sticky/&lt;key&gt;</code>
+  </p>
+
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="text-xs uppercase text-slate-500 border-b border-ink-700">
+        <tr>
+          <th class="text-left font-medium px-5 py-3">Modem</th>
+          <th class="text-left font-medium px-5 py-3">Operator</th>
+          <th class="text-left font-medium px-5 py-3">Public IP</th>
+          <th class="text-left font-medium px-5 py-3">HTTP</th>
+          <th class="text-left font-medium px-5 py-3">SOCKS5</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-ink-700">
+        {% if not proxies %}
+        <tr><td colspan="5" class="px-5 py-10 text-center text-slate-500">
+          No live proxies — enable a proxy on an online modem.</td></tr>
+        {% endif %}
+        {% for p in proxies %}
+        <tr class="hover:bg-ink-700/40">
+          <td class="px-5 py-3 font-medium">{{ p.name or p.imei }}</td>
+          <td class="px-5 py-3 text-slate-300">{{ p.operator or '—' }}</td>
+          <td class="px-5 py-3 font-mono text-xs">{{ p.ip or '—' }}</td>
+          <td class="px-5 py-3">
+            <button @click="copy('{{ p.http }}')" class="font-mono text-xs text-slate-300 hover:text-brand-400" title="Copy">{{ p.http }} ⧉</button>
+          </td>
+          <td class="px-5 py-3">
+            <button @click="copy('{{ p.socks5 }}')" class="font-mono text-xs text-slate-300 hover:text-brand-400" title="Copy">{{ p.socks5 }} ⧉</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div x-show="toast" x-cloak x-transition style="display:none"
+       class="fixed bottom-5 right-5 z-50 bg-ink-700 border border-ink-600 rounded-xl px-4 py-3 text-sm shadow-xl">
+    <span x-text="toast"></span>
+  </div>
+</div>
+{% endblock %}
