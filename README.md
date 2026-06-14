@@ -67,6 +67,12 @@ USB modems ──► ModemManager (libqmi / libmbim / AT)
 - **Modem layer** — ModemManager handles every supported modem
   (Huawei, Quectel, Fibocom, Sierra, ZTE, Telit…), so there are no per-vendor
   scripts to maintain.
+- **Net-mode dongles** — consumer "HiLink"/RNDIS sticks (e.g. Huawei E3372h,
+  ZTE MF-series) that present as a plain Ethernet interface rather than an AT
+  modem are also supported: `discover` finds them, sets up source-based policy
+  routing (so several dongles on the same `192.168.0.0/24` still egress out the
+  right interface), binds 3proxy to each dongle's local IP, and rotates the
+  public IP through the stick's own web API (ZTE goform / Huawei HiLink API).
 - **One proxy per modem** — each modem gets an HTTP and a SOCKS5 port, with
   outbound traffic bound to that modem's interface/IP via 3proxy.
 - **Rotation** — force a new public IP per modem on demand (reconnect bearer)

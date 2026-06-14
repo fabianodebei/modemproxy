@@ -13,11 +13,15 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS modems (
     imei            TEXT PRIMARY KEY,
     name            TEXT,                -- friendly nick (e.g. dongle1)
-    iface           TEXT,                -- network interface (wwan0 / wwan_dongle1)
+    kind            TEXT DEFAULT 'mm',   -- mm (ModemManager) | netdev (HiLink/net-mode)
+    iface           TEXT,                -- network interface (wwan0 / enx<mac>)
     mm_path         TEXT,                -- ModemManager object path
+    bind_ip         TEXT,                -- local source IP for 3proxy egress binding
+    mgmt_host       TEXT,                -- net-mode dongle web API host (e.g. 192.168.0.1)
+    rt_table        INTEGER,             -- policy-routing table id (net-mode dongles)
     model           TEXT,
     operator        TEXT,
-    ip              TEXT,                -- current WAN IP from operator
+    ip              TEXT,                -- current public WAN IP
     signal          INTEGER,            -- signal quality %
     status          TEXT DEFAULT 'unknown', -- online | offline | unknown
     last_seen       INTEGER,
@@ -112,6 +116,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ports ADD COLUMN quota_locked INTEGER DEFAULT 0")
     if "vpn_enabled" not in cols:
         conn.execute("ALTER TABLE ports ADD COLUMN vpn_enabled INTEGER DEFAULT 0")
+
+    mcols = {r["name"] for r in conn.execute("PRAGMA table_info(modems)")}
+    if "kind" not in mcols:
+        conn.execute("ALTER TABLE modems ADD COLUMN kind TEXT DEFAULT 'mm'")
+    if "bind_ip" not in mcols:
+        conn.execute("ALTER TABLE modems ADD COLUMN bind_ip TEXT")
+    if "mgmt_host" not in mcols:
+        conn.execute("ALTER TABLE modems ADD COLUMN mgmt_host TEXT")
+    if "rt_table" not in mcols:
+        conn.execute("ALTER TABLE modems ADD COLUMN rt_table INTEGER")
 
 
 @contextmanager

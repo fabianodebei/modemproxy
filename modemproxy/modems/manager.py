@@ -7,13 +7,12 @@ from typing import Any
 
 from .. import db
 from ..config import get_config
-from . import control
+from . import control, netdev
 
 
 def discover() -> list[dict[str, Any]]:
-    """Enumerate modems from ModemManager and upsert them into the DB."""
+    """Enumerate modems from ModemManager + net-mode dongles into the DB."""
     cfg = get_config()
-    ids = control.list_modem_ids()
     results: list[dict[str, Any]] = []
 
     def _one(mid: str) -> dict[str, Any] | None:
@@ -26,6 +25,7 @@ def discover() -> list[dict[str, Any]]:
         status = "online" if info.get("state") == "connected" else "offline"
         db.upsert_modem(
             info["imei"],
+            kind="mm",
             mm_path=info["mm_path"],
             model=info.get("model"),
             operator=info.get("operator"),
@@ -38,10 +38,22 @@ def discover() -> list[dict[str, Any]]:
         info["status"] = status
         return info
 
-    with ThreadPoolExecutor(max_workers=cfg.max_parallel_workers) as ex:
-        for r in ex.map(_one, ids):
-            if r:
-                results.append(r)
+    # ModemManager modems (may be empty if mmcli absent / no AT-mode modems).
+    try:
+        ids = control.list_modem_ids()
+    except control.MMError:
+        ids = []
+    if ids:
+        with ThreadPoolExecutor(max_workers=cfg.max_parallel_workers) as ex:
+            for r in ex.map(_one, ids):
+                if r:
+                    results.append(r)
+
+    # Net-mode (HiLink/RNDIS) dongles ModemManager can't drive.
+    try:
+        results.extend(netdev.discover())
+    except Exception:  # discovery of net dongles must never break mm discovery
+        pass
     return results
 
 
@@ -64,9 +76,16 @@ def _mm_id_for(imei: str) -> str | None:
 
 
 def rotate(imei: str, reason: str = "manual") -> dict[str, Any]:
-    """Force a new public IP for one modem by reconnecting its data bearer."""
+    """Force a new public IP for one modem by reconnecting its data link."""
     old = db.get_modem(imei)
     old_ip = old.get("ip") if old else None
+
+    if old and old.get("kind") == "netdev":
+        new_ip = netdev.rotate(old)
+        db.upsert_modem(imei, ip=new_ip, last_seen=db.now())
+        db.log_rotation(imei, old_ip, new_ip, reason)
+        return {"imei": imei, "old_ip": old_ip, "new_ip": new_ip}
+
     mid = _mm_id_for(imei)
     if not mid:
         raise control.MMError(f"modem {imei} not present")

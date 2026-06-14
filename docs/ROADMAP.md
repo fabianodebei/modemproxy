@@ -32,7 +32,11 @@ Status of feature parity with a full commercial modem-proxy manager.
   policy-routed egress, single-file `.ovpn` download from the panel
 - API keys — pool consumers authenticate via `Bearer`/`X-API-Key` without the
   admin password; managed from the Settings page
-- Test suite (37 tests) + GitHub Actions CI (py3.10/3.12)
+- Net-mode (HiLink/RNDIS) dongle support — discovery of cdc_ether/cdc_ncm/
+  rndis_host sticks ModemManager can't drive; per-dongle source policy routing
+  for shared subnets; 3proxy egress bound to the local interface IP; IP
+  rotation via the dongle web API (ZTE goform + Huawei HiLink)
+- Test suite (42 tests) + GitHub Actions CI (py3.10/3.12)
 
 ## Next
 - **OS/TCP fingerprint spoofing layer** (p0f / osfooler) — last major

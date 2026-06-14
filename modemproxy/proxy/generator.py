@@ -19,6 +19,13 @@ _env = Environment(
 )
 
 
+def _gw_of(bind_ip: str) -> str:
+    """Derive the dongle gateway (x.x.x.1) from a /24 interface IP."""
+    import ipaddress
+    net = ipaddress.ip_network(f"{bind_ip}/24", strict=False)
+    return str(net.network_address + 1)
+
+
 def _modem_index(imei: str) -> int:
     """Stable small integer per modem, used to derive default ports."""
     modems = sorted(m["imei"] for m in db.list_modems())
@@ -63,7 +70,9 @@ def render_modem(imei: str) -> Path:
         password=port.get("password"),
         http_port=port["http_port"],
         socks_port=port["socks_port"],
-        modem_ip=modem.get("ip") or "0.0.0.0",
+        # net-mode dongles egress from their local interface IP (bind_ip);
+        # MM modems bind to the operator-assigned WAN IP.
+        modem_ip=modem.get("bind_ip") or modem.get("ip") or "0.0.0.0",
         bind_address=cfg.bind_address,
         white_list=",".join(white_list) if white_list else "",
     )
@@ -120,6 +129,16 @@ def apply_port(imei: str, **alloc_kwargs) -> dict:
     port = allocate_port(imei, **alloc_kwargs)
     render_modem(imei)
     modem = db.get_modem(imei) or {}
+    # Net-mode dongles need source-based policy routing in place so 3proxy's
+    # egress bind actually leaves through the right interface.
+    if modem.get("kind") == "netdev" and modem.get("bind_ip") and modem.get("rt_table"):
+        from ..modems import netdev
+        try:
+            netdev.setup_routing(modem["iface"], modem["bind_ip"],
+                                 modem.get("mgmt_host") or _gw_of(modem["bind_ip"]),
+                                 int(modem["rt_table"]))
+        except Exception:
+            pass
     name = modem.get("name") or imei[-6:]
     _systemctl("enable", f"modemproxy-proxy@{name}.service")
     _systemctl("restart", f"modemproxy-proxy@{name}.service")
