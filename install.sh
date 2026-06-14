@@ -37,10 +37,15 @@ log "Installing system packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq \
-    git python3 python3-venv python3-pip \
+    git make gcc build-essential pkg-config \
+    python3 python3-venv python3-pip python3-dev \
+    libffi-dev libssl-dev \
     modemmanager libqmi-utils libmbim-utils \
-    usbutils uhubctl curl ca-certificates \
-    openvpn openssl iproute2 iptables build-essential \
+    usb-modeswitch usb-modeswitch-data ppp \
+    usbutils uhubctl curl wget ca-certificates \
+    openvpn openssl iproute2 iptables \
+    isc-dhcp-client \
+    net-tools dnsutils procps jq \
     || die "apt install failed"
 
 # 3proxy: try package first, fall back to build from source
