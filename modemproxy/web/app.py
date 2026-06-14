@@ -65,7 +65,9 @@ def _ts(epoch) -> str:
 
 templates.env.filters["bytes"] = _humanbytes
 templates.env.filters["ts"] = _ts
-app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
+_static_dir = BASE / "static"
+_static_dir.mkdir(parents=True, exist_ok=True)  # may be absent after a pip install
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 
 # --- auth ------------------------------------------------------------------
