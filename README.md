@@ -3,8 +3,20 @@
 Turn an Ubuntu box full of 4G/LTE USB modems into a pool of **rotating
 HTTP/SOCKS5 proxies**, each egressing through its own SIM and public IP.
 
-Self-hosted, single binary stack (Python + SQLite + 3proxy), web panel + CLI +
-REST API. One-command install.
+Self-hosted, single stack (Python + SQLite + 3proxy). Modern dark web panel,
+CLI, and REST API. One-command install.
+
+## Web panel
+
+A modern, server-rendered dashboard (Tailwind + Alpine.js + Chart.js — no Node
+build step):
+
+- **Login** — cookie session (no browser basic-auth popup).
+- **Dashboard** — modem grid with live signal, status, public IP, ports; stat
+  cards; per-modem detail drawer with copy-paste HTTP/SOCKS/curl strings, a QR
+  code, password change / credential regeneration, and rotate / reset / disable.
+- **Bandwidth** — today / yesterday / month / lifetime usage table plus a
+  24-hour throughput chart per modem.
 
 > Original, independent implementation. Not affiliated with any commercial
 > proxy-management product.
@@ -57,8 +69,8 @@ USB modems ──► ModemManager (libqmi / libmbim / AT)
   outbound traffic bound to that modem's interface/IP via 3proxy.
 - **Rotation** — force a new public IP per modem on demand (reconnect bearer)
   or on a timer; every change is logged.
-- **Panel + API** — server-rendered dashboard (HTMX, no Node build) and a JSON
-  API under `/api`.
+- **Panel + API** — modern dashboard (Tailwind + Alpine, no Node build) and a
+  JSON API under `/api`.
 
 ## CLI
 

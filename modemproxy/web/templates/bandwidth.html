@@ -1,0 +1,85 @@
+{% extends "app_base.html" %}
+{% set active = 'bandwidth' %}
+{% block title %}Bandwidth · modemproxy{% endblock %}
+{% block page_title %}Bandwidth{% endblock %}
+
+{% block main %}
+<div x-data="bw()" x-init="init()">
+
+  <!-- summary table -->
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl overflow-hidden mb-6">
+    <table class="w-full text-sm">
+      <thead class="text-xs uppercase text-slate-500 border-b border-ink-700">
+        <tr>
+          <th class="text-left font-medium px-5 py-3"></th>
+          <th class="text-right font-medium px-5 py-3">Today</th>
+          <th class="text-right font-medium px-5 py-3">Yesterday</th>
+          <th class="text-right font-medium px-5 py-3">This month</th>
+          <th class="text-right font-medium px-5 py-3">Last month</th>
+          <th class="text-right font-medium px-5 py-3">Lifetime</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-ink-700 font-mono">
+        <tr>
+          <td class="px-5 py-3 font-sans text-emerald-400 font-medium">↓ Download</td>
+          <td class="px-5 py-3 text-right">{{ bw.day_in | bytes }}</td>
+          <td class="px-5 py-3 text-right">{{ bw.yesterday_in | bytes }}</td>
+          <td class="px-5 py-3 text-right">{{ bw.month_in | bytes }}</td>
+          <td class="px-5 py-3 text-right">{{ bw.prevmonth_in | bytes }}</td>
+          <td class="px-5 py-3 text-right">{{ bw.lifetime_in | bytes }}</td>
+        </tr>
+        <tr>
+          <td class="px-5 py-3 font-sans text-brand-400 font-medium">↑ Upload</td>
+          <td class="px-5 py-3 text-right">{{ bw.day_out | bytes }}</td>
+          <td class="px-5 py-3 text-right">{{ bw.yesterday_out | bytes }}</td>
+          <td class="px-5 py-3 text-right">{{ bw.month_out | bytes }}</td>
+          <td class="px-5 py-3 text-right">{{ bw.prevmonth_out | bytes }}</td>
+          <td class="px-5 py-3 text-right">{{ bw.lifetime_out | bytes }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- per-modem chart -->
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-medium text-slate-300">Throughput (last 24h)</h2>
+      <select x-model="imei" @change="load()"
+              class="bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        {% for m in modems %}
+        <option value="{{ m.imei }}">{{ m.name or m.model or m.imei }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="h-72"><canvas id="chart"></canvas></div>
+    {% if not modems %}<p class="text-center text-slate-500 py-8">No modems yet.</p>{% endif %}
+  </div>
+</div>
+
+<script>
+function bw(){
+  return {
+    imei: {{ (modems[0].imei if modems else '') | tojson }},
+    chart:null,
+    async init(){ if(this.imei) await this.load(); },
+    async load(){
+      const data=await (await fetch(`/api/bandwidth/${this.imei}/series?hours=24`)).json();
+      const labels=data.map(d=>new Date(d.ts*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+      const rx=data.map(d=>d.rx/1024/1024), tx=data.map(d=>d.tx/1024/1024);
+      if(this.chart) this.chart.destroy();
+      this.chart=new Chart(document.getElementById('chart'),{
+        type:'line',
+        data:{labels,datasets:[
+          {label:'Download MB',data:rx,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.1)',fill:true,tension:.3,pointRadius:0},
+          {label:'Upload MB',data:tx,borderColor:'#4f8cff',backgroundColor:'rgba(79,140,255,.1)',fill:true,tension:.3,pointRadius:0},
+        ]},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{labels:{color:'#94a3b8'}}},
+          scales:{x:{ticks:{color:'#64748b',maxTicksLimit:8},grid:{color:'#1f2430'}},
+                  y:{ticks:{color:'#64748b'},grid:{color:'#1f2430'}}}}
+      });
+    }
+  }
+}
+</script>
+{% endblock %}

@@ -72,12 +72,14 @@ mkdir -p "$CONF_DIR/autogen"
 mkdir -p /var/lib/modemproxy /var/log/modemproxy
 if [ ! -f "$CONF" ]; then
     PW="$(head -c12 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c16)"
+    SECRET="$(head -c32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c40)"
     cat > "$CONF" <<EOF
 # modemproxy configuration — see docs/CONFIG.md for all keys
 web_host: 0.0.0.0
 web_port: 6997
 admin_user: admin
 admin_password: "$PW"
+session_secret: "$SECRET"
 
 http_port_base: 8000
 socks_port_base: 9000
@@ -97,6 +99,7 @@ udevadm control --reload-rules || true
 systemctl daemon-reload
 systemctl enable --now modemproxy-web.service
 systemctl enable --now modemproxy-pinger.timer
+systemctl enable --now modemproxy-bandwidth.timer
 
 log "Initial modem discovery"
 "$VENV/bin/modemproxy" init-db

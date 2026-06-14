@@ -1,0 +1,9 @@
+[Unit]
+Description=modemproxy bandwidth counter sampler
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/modemproxy/venv/bin/modemproxy bw-sample
+Environment=MODEMPROXY_CONFIG=/etc/modemproxy/config.yaml
+User=root

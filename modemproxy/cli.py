@@ -12,6 +12,7 @@ import sys
 from . import db
 from .modems import control, manager
 from .proxy import generator
+from .services import bandwidth
 
 
 def _print_json(obj) -> None:
@@ -117,6 +118,17 @@ def cmd_send_sms(args) -> int:
     return 0
 
 
+def cmd_bw_sample(args) -> int:
+    n = bandwidth.sample()
+    print(f"sampled {n} interface(s)")
+    return 0
+
+
+def cmd_bw_report(args) -> int:
+    _print_json(bandwidth.report(args.imei))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="modemproxy", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -161,6 +173,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("name", cmd_name, "set a friendly nick for a modem")
     sp.add_argument("imei")
     sp.add_argument("name")
+
+    add("bw-sample", cmd_bw_sample, "record one bandwidth counter sample")
+
+    sp = add("bw-report", cmd_bw_report, "bandwidth usage report")
+    sp.add_argument("imei", nargs="?")
 
     sp = add("list-sms", cmd_list_sms, "list SMS on a modem")
     sp.add_argument("imei")

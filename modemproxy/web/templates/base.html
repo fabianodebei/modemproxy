@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}modemproxy{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: {
+        colors: {
+          ink:    { 900:'#0b0d12', 800:'#11141b', 700:'#171b24', 600:'#1f2430', 500:'#2a3140' },
+          brand:  { 400:'#6ea8ff', 500:'#4f8cff', 600:'#3a74e6' },
+        },
+        fontFamily: { sans: ['Inter','system-ui','sans-serif'], mono: ['ui-monospace','monospace'] },
+      }}
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <style>
+    body { font-family:'Inter',system-ui,sans-serif; }
+    ::-webkit-scrollbar{width:10px;height:10px}
+    ::-webkit-scrollbar-thumb{background:#2a3140;border-radius:6px}
+    [x-cloak]{display:none!important}
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="bg-ink-900 text-slate-200 antialiased">
+{% block body %}{% endblock %}
+</body>
+</html>

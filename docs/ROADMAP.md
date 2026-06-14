@@ -7,13 +7,15 @@ Status of feature parity with a full commercial modem-proxy manager.
 - SQLite store: modems, ports, rotation log, SMS, bandwidth schema
 - Per-modem 3proxy generation (HTTP + SOCKS5, per-modem egress IP)
 - Manual IP rotation (single + all) with logging
-- Web panel (HTMX) + JSON API + CLI
+- Modern web panel (Tailwind + Alpine + Chart.js) — login, dashboard with
+  detail drawer (QR + connection strings + credential edit), bandwidth page
+- Bandwidth accounting — per-interface counter sampler + usage reports + charts
+- JSON API + CLI
 - SMS list/send via ModemManager
-- systemd units, udev auto-discovery, one-command installer
+- systemd units (incl. bandwidth + pinger timers), udev auto-discovery,
+  one-command installer
 
 ## Next
-- **Bandwidth accounting** — poll per-interface counters into `bandwidth`
-  table; expose reports (mirrors `bandwidth_report_*`).
 - **Per-port rotation timers** — honour `ports.rotation_interval` via a
   background scheduler / systemd timer per modem.
 - **USSD** — balance checks (`send_ussd_json`).

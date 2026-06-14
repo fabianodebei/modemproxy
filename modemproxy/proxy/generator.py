@@ -68,6 +68,21 @@ def render_modem(imei: str) -> Path:
     return out
 
 
+def set_password(imei: str, password: str) -> dict:
+    """Change a modem's proxy password and restart its proxy."""
+    if not db.get_port(imei):
+        raise ValueError(f"no proxy configured for {imei}")
+    db.set_port(imei, password=password)
+    return apply_port(imei)
+
+
+def regenerate_credentials(imei: str) -> dict:
+    """Issue a fresh username+password for a modem's proxy."""
+    idx = _modem_index(imei)
+    db.set_port(imei, username=f"u{idx}", password=secrets.token_hex(8))
+    return apply_port(imei)
+
+
 def purge_port(imei: str) -> None:
     modem = db.get_modem(imei) or {}
     name = modem.get("name") or imei[-6:]

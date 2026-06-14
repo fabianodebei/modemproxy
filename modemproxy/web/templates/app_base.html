@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="flex min-h-screen">
+  <!-- sidebar -->
+  <aside class="w-60 shrink-0 border-r border-ink-700 bg-ink-800/60 flex flex-col">
+    <div class="flex items-center gap-2.5 px-5 h-16 border-b border-ink-700">
+      <div class="h-8 w-8 rounded-lg bg-brand-500/15 grid place-items-center">
+        <svg class="h-5 w-5 text-brand-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <span class="font-semibold tracking-tight">modemproxy</span>
+    </div>
+    <nav class="p-3 space-y-1 text-sm">
+      {% set nav = active|default('dashboard') %}
+      <a href="/" class="flex items-center gap-3 px-3 py-2 rounded-lg
+         {{ 'bg-brand-500/15 text-brand-300' if nav=='dashboard' else 'text-slate-400 hover:bg-ink-700 hover:text-slate-200' }}">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Dashboard
+      </a>
+      <a href="/bandwidth" class="flex items-center gap-3 px-3 py-2 rounded-lg
+         {{ 'bg-brand-500/15 text-brand-300' if nav=='bandwidth' else 'text-slate-400 hover:bg-ink-700 hover:text-slate-200' }}">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+        Bandwidth
+      </a>
+    </nav>
+    <div class="mt-auto p-3 border-t border-ink-700">
+      <a href="/logout" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-ink-700 hover:text-slate-200">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+        Sign out
+      </a>
+    </div>
+  </aside>
+
+  <!-- main -->
+  <div class="flex-1 min-w-0 flex flex-col">
+    <header class="h-16 border-b border-ink-700 flex items-center justify-between px-6">
+      <h1 class="text-lg font-semibold tracking-tight">{% block page_title %}{% endblock %}</h1>
+      <div class="flex items-center gap-3 text-sm text-slate-400">
+        {% block toolbar %}{% endblock %}
+        <span class="hidden sm:inline">{{ user }}</span>
+        <div class="h-8 w-8 rounded-full bg-ink-600 grid place-items-center text-xs font-medium text-slate-300">
+          {{ (user or 'A')[0]|upper }}
+        </div>
+      </div>
+    </header>
+    <main class="flex-1 p-6 overflow-x-hidden">{% block main %}{% endblock %}</main>
+  </div>
+</div>
+{% endblock %}

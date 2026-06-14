@@ -1,33 +1,235 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>modemproxy</title>
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-  <header>
-    <h1>modemproxy</h1>
-    <button hx-post="/ui/discover" hx-target="#rows" hx-swap="innerHTML">Discover</button>
-  </header>
+{% extends "app_base.html" %}
+{% set active = 'dashboard' %}
+{% block title %}Dashboard · modemproxy{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
 
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th><th>IMEI</th><th>Operator</th><th>IP</th>
-        <th>Signal</th><th>HTTP</th><th>SOCKS</th><th>Status</th><th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="rows">
-      {% include "_modem_rows.html" %}
-    </tbody>
-  </table>
+{% block toolbar %}
+  <button @click="discover()" :disabled="busy"
+          class="flex items-center gap-2 bg-brand-500 hover:bg-brand-600 disabled:opacity-50
+                 text-white rounded-lg px-3 py-1.5 text-sm font-medium">
+    <svg class="h-4 w-4" :class="busy && 'animate-spin'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+    Discover
+  </button>
+{% endblock %}
 
-  <footer>
-    <small>Proxies bind on {{ cfg.bind_address }} · panel on
-      {{ cfg.web_host }}:{{ cfg.web_port }}</small>
-  </footer>
-</body>
-</html>
+{% block main %}
+<div x-data="dashboard()" x-init="init()">
+
+  <!-- stat cards -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+      <p class="text-xs text-slate-400">Modems</p>
+      <p class="text-2xl font-semibold mt-1" x-text="modems.length"></p>
+    </div>
+    <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+      <p class="text-xs text-slate-400">Online</p>
+      <p class="text-2xl font-semibold mt-1 text-emerald-400"
+         x-text="modems.filter(m=>m.status==='online').length"></p>
+    </div>
+    <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+      <p class="text-xs text-slate-400">Active proxies</p>
+      <p class="text-2xl font-semibold mt-1" x-text="modems.filter(m=>m.http_port).length"></p>
+    </div>
+    <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+      <p class="text-xs text-slate-400">Traffic today</p>
+      <p class="text-2xl font-semibold mt-1">{{ (bw.day_in + bw.day_out) | bytes }}</p>
+    </div>
+  </div>
+
+  <!-- modem table -->
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="text-xs uppercase text-slate-500 border-b border-ink-700">
+        <tr>
+          <th class="text-left font-medium px-5 py-3">Modem</th>
+          <th class="text-left font-medium px-5 py-3">Operator</th>
+          <th class="text-left font-medium px-5 py-3">Public IP</th>
+          <th class="text-left font-medium px-5 py-3">Signal</th>
+          <th class="text-left font-medium px-5 py-3">Ports</th>
+          <th class="text-left font-medium px-5 py-3">Status</th>
+          <th class="text-right font-medium px-5 py-3">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-ink-700">
+        <template x-if="modems.length===0">
+          <tr><td colspan="7" class="px-5 py-10 text-center text-slate-500">
+            No modems yet — plug one in and click <b>Discover</b>.</td></tr>
+        </template>
+        <template x-for="m in modems" :key="m.imei">
+          <tr class="hover:bg-ink-700/40">
+            <td class="px-5 py-3">
+              <button @click="open(m)" class="font-medium text-slate-100 hover:text-brand-400" x-text="m.name || m.model || '—'"></button>
+              <div class="font-mono text-xs text-slate-500" x-text="m.imei"></div>
+            </td>
+            <td class="px-5 py-3 text-slate-300" x-text="m.operator || '—'"></td>
+            <td class="px-5 py-3 font-mono text-xs" x-text="m.ip || '—'"></td>
+            <td class="px-5 py-3">
+              <div class="flex items-center gap-2">
+                <div class="h-1.5 w-16 rounded-full bg-ink-600 overflow-hidden">
+                  <div class="h-full bg-brand-500" :style="`width:${m.signal||0}%`"></div>
+                </div>
+                <span class="text-xs text-slate-400" x-text="(m.signal||0)+'%'"></span>
+              </div>
+            </td>
+            <td class="px-5 py-3 font-mono text-xs">
+              <template x-if="m.http_port">
+                <span><span class="text-slate-400">H</span> <span x-text="m.http_port"></span>
+                  · <span class="text-slate-400">S</span> <span x-text="m.socks_port"></span></span>
+              </template>
+              <template x-if="!m.http_port"><span class="text-slate-600">—</span></template>
+            </td>
+            <td class="px-5 py-3">
+              <span class="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full"
+                    :class="{
+                      'bg-emerald-500/15 text-emerald-400': m.status==='online',
+                      'bg-red-500/15 text-red-400': m.status==='offline',
+                      'bg-slate-500/15 text-slate-400': m.status!=='online'&&m.status!=='offline'}">
+                <span class="h-1.5 w-1.5 rounded-full"
+                      :class="m.status==='online'?'bg-emerald-400':m.status==='offline'?'bg-red-400':'bg-slate-400'"></span>
+                <span x-text="m.status"></span>
+              </span>
+            </td>
+            <td class="px-5 py-3">
+              <div class="flex items-center justify-end gap-1.5">
+                <template x-if="m.http_port">
+                  <button @click="rotate(m)" :disabled="busy" title="Force new IP"
+                          class="px-2.5 py-1.5 rounded-lg bg-ink-700 hover:bg-ink-600 text-xs">Rotate</button>
+                </template>
+                <template x-if="!m.http_port">
+                  <button @click="apply(m)" :disabled="busy" title="Allocate proxy"
+                          class="px-2.5 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-xs">Enable proxy</button>
+                </template>
+                <button @click="open(m)" title="Details"
+                        class="px-2.5 py-1.5 rounded-lg bg-ink-700 hover:bg-ink-600 text-xs">⋯</button>
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- detail drawer -->
+  <div x-show="selected" x-cloak class="fixed inset-0 z-40" style="display:none">
+    <div class="absolute inset-0 bg-black/50" @click="selected=null"></div>
+    <div class="absolute right-0 top-0 h-full w-full max-w-md bg-ink-800 border-l border-ink-700 shadow-2xl overflow-y-auto"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0">
+      <template x-if="selected">
+        <div class="p-6 space-y-6">
+          <div class="flex items-start justify-between">
+            <div>
+              <h3 class="text-lg font-semibold" x-text="selected.name || selected.model || 'Modem'"></h3>
+              <p class="font-mono text-xs text-slate-500" x-text="selected.imei"></p>
+            </div>
+            <button @click="selected=null" class="text-slate-500 hover:text-slate-200">✕</button>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 text-sm">
+            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Operator</p><p x-text="selected.operator||'—'"></p></div>
+            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Public IP</p><p class="font-mono" x-text="selected.ip||'—'"></p></div>
+            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Signal</p><p x-text="(selected.signal||0)+'%'"></p></div>
+            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Status</p><p x-text="selected.status"></p></div>
+          </div>
+
+          <template x-if="selected.http_port">
+            <div class="space-y-4">
+              <!-- connection strings -->
+              <div>
+                <p class="text-xs font-medium text-slate-400 mb-2">Connection</p>
+                <div class="space-y-2">
+                  <template x-for="line in connStrings(selected)" :key="line.label">
+                    <div class="flex items-center gap-2 bg-ink-700/50 rounded-lg px-3 py-2">
+                      <span class="text-[10px] uppercase text-slate-500 w-10" x-text="line.label"></span>
+                      <code class="text-xs flex-1 truncate" x-text="line.value"></code>
+                      <button @click="copy(line.value)" class="text-slate-500 hover:text-brand-400" title="Copy">⧉</button>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- QR -->
+              <div class="flex items-center gap-4">
+                <div class="bg-white p-2 rounded-lg" x-html="qr(connStrings(selected)[0].value)"></div>
+                <p class="text-xs text-slate-500">Scan to load the HTTP proxy on a phone.</p>
+              </div>
+
+              <!-- credentials edit -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">Proxy password</p>
+                <div class="flex gap-2">
+                  <input x-model="newPw" type="text" placeholder="new password"
+                         class="flex-1 bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm">
+                  <button @click="setPassword(selected)" :disabled="busy||!newPw"
+                          class="px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white text-sm">Save</button>
+                </div>
+                <button @click="regenerate(selected)" :disabled="busy"
+                        class="text-xs text-slate-400 hover:text-brand-400">↻ Regenerate username + password</button>
+              </div>
+
+              <div class="flex gap-2 pt-2">
+                <button @click="rotate(selected)" :disabled="busy" class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Rotate IP</button>
+                <button @click="reset(selected)" :disabled="busy" class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Reset modem</button>
+                <button @click="purge(selected)" :disabled="busy" class="px-3 py-2 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-400 text-sm">Disable</button>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="!selected.http_port">
+            <button @click="apply(selected)" :disabled="busy"
+                    class="w-full px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm">Enable proxy on this modem</button>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- toast -->
+  <div x-show="toast" x-cloak x-transition style="display:none"
+       class="fixed bottom-5 right-5 z-50 bg-ink-700 border border-ink-600 rounded-xl px-4 py-3 text-sm shadow-xl">
+    <span x-text="toast"></span>
+  </div>
+</div>
+
+<script>
+const SERVER_HOST = {{ (cfg.bind_address if cfg.bind_address != '0.0.0.0' else request.url.hostname) | tojson }};
+function dashboard(){
+  return {
+    modems: {{ modems | tojson }},
+    selected:null, busy:false, toast:'', newPw:'',
+    init(){},
+    notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
+    async api(method,url,body){
+      this.busy=true;
+      try{
+        const r=await fetch(url,{method,headers:body?{'Content-Type':'application/json'}:{},
+          body:body?JSON.stringify(body):undefined});
+        if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText);
+        return await r.json();
+      }catch(e){ this.notify('Error: '+e.message); throw e; }
+      finally{ this.busy=false; }
+    },
+    async refresh(){ this.modems=await this.api('GET','/api/modems');
+      if(this.selected){ this.selected=this.modems.find(m=>m.imei===this.selected.imei)||null; } },
+    async discover(){ await this.api('POST','/api/discover'); await this.refresh(); this.notify('Discovery complete'); },
+    open(m){ this.selected=m; this.newPw=''; },
+    async rotate(m){ const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
+    async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); await this.refresh(); this.notify('Proxy enabled'); },
+    async purge(m){ await this.api('DELETE',`/api/modems/${m.imei}/port`); await this.refresh(); this.notify('Proxy disabled'); },
+    async reset(m){ await this.api('POST',`/api/modems/${m.imei}/reset`); this.notify('Reset sent'); },
+    async setPassword(m){ await this.api('POST',`/api/modems/${m.imei}/password`,{password:this.newPw}); this.newPw=''; await this.refresh(); this.notify('Password updated'); },
+    async regenerate(m){ await this.api('POST',`/api/modems/${m.imei}/regenerate`); await this.refresh(); this.notify('Credentials regenerated'); },
+    connStrings(m){
+      const a = m.username?`${m.username}:${m.password}@`:'';
+      return [
+        {label:'HTTP', value:`http://${a}${SERVER_HOST}:${m.http_port}`},
+        {label:'SOCKS',value:`socks5h://${a}${SERVER_HOST}:${m.socks_port}`},
+        {label:'curl', value:`curl -x http://${a}${SERVER_HOST}:${m.http_port} https://api.ipify.org`},
+      ];
+    },
+    copy(t){ navigator.clipboard.writeText(t); this.notify('Copied'); },
+    qr(text){ const q=qrcode(0,'M'); q.addData(text); q.make(); return q.createSvgTag({cellSize:3,margin:0}); },
+  }
+}
+</script>
+{% endblock %}

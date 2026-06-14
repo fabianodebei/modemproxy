@@ -24,6 +24,7 @@ class Config:
     web_port: int = 6997
     admin_user: str = "admin"
     admin_password: str = "admin"  # change on first install
+    session_secret: str = "change-me-in-config"  # signs the login cookie
 
     # Proxy port allocation
     http_port_base: int = 8000      # modem N -> http_port_base + N

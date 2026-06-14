@@ -1,42 +1,93 @@
 """FastAPI admin panel + JSON API.
 
-UI is server-rendered Jinja + HTMX (no Node build step). The same routes back
-both the dashboard and a small REST API under /api.
+UI: server-rendered Jinja + Tailwind (CDN) + Alpine.js + Chart.js — no Node
+build step. Cookie-session login for the UI; the JSON API under /api accepts
+either the session cookie or HTTP basic auth.
 """
 from __future__ import annotations
 
+import base64
 import secrets
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 from .. import db
 from ..config import get_config
-from ..modems import manager
+from ..modems import control, manager
 from ..proxy import generator
+from ..services import bandwidth
 
 BASE = Path(__file__).parent
+_cfg = get_config()
 app = FastAPI(title="modemproxy", docs_url="/api/docs")
+app.add_middleware(SessionMiddleware, secret_key=_cfg.session_secret,
+                   session_cookie="modemproxy_session", max_age=86400 * 7)
 templates = Jinja2Templates(directory=str(BASE / "templates"))
+
+
+def _humanbytes(n) -> str:
+    try:
+        n = float(n or 0)
+    except (TypeError, ValueError):
+        return "0 B"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(n) < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+templates.env.filters["bytes"] = _humanbytes
 app.mount("/static", StaticFiles(directory=str(BASE / "static")), name="static")
-security = HTTPBasic()
 
 
-def auth(creds: HTTPBasicCredentials = Depends(security)) -> str:
+# --- auth ------------------------------------------------------------------
+
+def _check_credentials(user: str, pw: str) -> bool:
     cfg = get_config()
-    ok_user = secrets.compare_digest(creds.username, cfg.admin_user)
-    ok_pass = secrets.compare_digest(creds.password, cfg.admin_password)
-    if not (ok_user and ok_pass):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return creds.username
+    return (secrets.compare_digest(user, cfg.admin_user)
+            and secrets.compare_digest(pw, cfg.admin_password))
+
+
+def ui_auth(request: Request):
+    """UI guard: redirect to /login when no valid session."""
+    if not request.session.get("user"):
+        raise _RedirectToLogin()
+    return request.session["user"]
+
+
+def api_auth(request: Request) -> str:
+    """API guard: accept session cookie OR HTTP basic auth."""
+    if request.session.get("user"):
+        return request.session["user"]
+    header = request.headers.get("authorization", "")
+    if header.startswith("Basic "):
+        try:
+            raw = base64.b64decode(header[6:]).decode()
+            user, _, pw = raw.partition(":")
+        except Exception:
+            raw = ""
+            user = pw = ""
+        if _check_credentials(user, pw):
+            return user
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized",
+        headers={"WWW-Authenticate": "Basic"},
+    )
+
+
+class _RedirectToLogin(Exception):
+    pass
+
+
+@app.exception_handler(_RedirectToLogin)
+async def _redirect_login(request: Request, exc: _RedirectToLogin):
+    return RedirectResponse("/login", status_code=303)
 
 
 @app.on_event("startup")
@@ -44,71 +95,120 @@ def _startup() -> None:
     db.init_db()
 
 
-# --- UI --------------------------------------------------------------------
+# --- login -----------------------------------------------------------------
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request):
+    if request.session.get("user"):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request, "login.html", {"error": None})
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+    if _check_credentials(username, password):
+        request.session["user"] = username
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        request, "login.html", {"error": "Invalid credentials"},
+        status_code=401,
+    )
+
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
+# --- UI pages --------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, _: str = Depends(auth)):
-    modems = db.list_modems()
+def dashboard(request: Request, user: str = Depends(ui_auth)):
     return templates.TemplateResponse(
-        "dashboard.html",
-        {"request": request, "modems": modems, "cfg": get_config()},
+        request, "dashboard.html",
+        {"user": user, "cfg": get_config(),
+         "modems": db.list_modems(), "bw": bandwidth.report()},
     )
 
 
-@app.post("/ui/discover", response_class=HTMLResponse)
-def ui_discover(request: Request, _: str = Depends(auth)):
-    manager.discover()
+@app.get("/bandwidth", response_class=HTMLResponse)
+def bandwidth_page(request: Request, user: str = Depends(ui_auth)):
     return templates.TemplateResponse(
-        "_modem_rows.html", {"request": request, "modems": db.list_modems()}
-    )
-
-
-@app.post("/ui/rotate/{imei}", response_class=HTMLResponse)
-def ui_rotate(request: Request, imei: str, _: str = Depends(auth)):
-    manager.rotate(imei, reason="web")
-    return templates.TemplateResponse(
-        "_modem_rows.html", {"request": request, "modems": db.list_modems()}
-    )
-
-
-@app.post("/ui/apply/{imei}", response_class=HTMLResponse)
-def ui_apply(request: Request, imei: str, _: str = Depends(auth)):
-    generator.apply_port(imei)
-    return templates.TemplateResponse(
-        "_modem_rows.html", {"request": request, "modems": db.list_modems()}
+        request, "bandwidth.html",
+        {"user": user, "modems": db.list_modems(),
+         "bw": bandwidth.report()},
     )
 
 
 # --- JSON API --------------------------------------------------------------
 
 @app.get("/api/modems")
-def api_modems(_: str = Depends(auth)):
+def api_modems(_: str = Depends(api_auth)):
     return db.list_modems()
 
 
+@app.get("/api/modems/{imei}")
+def api_modem(imei: str, _: str = Depends(api_auth)):
+    m = db.get_modem(imei)
+    if not m:
+        raise HTTPException(404, "not found")
+    return {**m, "port": db.get_port(imei)}
+
+
 @app.post("/api/discover")
-def api_discover(_: str = Depends(auth)):
+def api_discover(_: str = Depends(api_auth)):
     return manager.discover()
 
 
 @app.post("/api/modems/{imei}/rotate")
-def api_rotate(imei: str, _: str = Depends(auth)):
+def api_rotate(imei: str, _: str = Depends(api_auth)):
     return manager.rotate(imei, reason="api")
 
 
 @app.post("/api/modems/{imei}/apply-port")
-def api_apply(imei: str, _: str = Depends(auth)):
+def api_apply(imei: str, _: str = Depends(api_auth)):
     return generator.apply_port(imei)
 
 
+@app.post("/api/modems/{imei}/password")
+async def api_set_password(imei: str, request: Request, _: str = Depends(api_auth)):
+    body = await request.json()
+    pw = (body or {}).get("password", "")
+    if not pw:
+        raise HTTPException(400, "password required")
+    return generator.set_password(imei, pw)
+
+
+@app.post("/api/modems/{imei}/regenerate")
+def api_regen(imei: str, _: str = Depends(api_auth)):
+    return generator.regenerate_credentials(imei)
+
+
 @app.delete("/api/modems/{imei}/port")
-def api_purge(imei: str, _: str = Depends(auth)):
+def api_purge(imei: str, _: str = Depends(api_auth)):
     generator.purge_port(imei)
     return {"ok": True}
 
 
+@app.post("/api/modems/{imei}/reset")
+def api_reset(imei: str, _: str = Depends(api_auth)):
+    manager.reset_modem(imei)
+    return {"ok": True}
+
+
+@app.get("/api/bandwidth")
+def api_bandwidth(imei: str | None = None, _: str = Depends(api_auth)):
+    return bandwidth.report(imei)
+
+
+@app.get("/api/bandwidth/{imei}/series")
+def api_bw_series(imei: str, hours: int = 24, _: str = Depends(api_auth)):
+    return bandwidth.series(imei, hours=hours)
+
+
 @app.get("/api/rotation-log")
-def api_rotlog(imei: str | None = None, limit: int = 100, _: str = Depends(auth)):
+def api_rotlog(imei: str | None = None, limit: int = 100, _: str = Depends(api_auth)):
     return db.rotation_log(imei, limit)
 
 
