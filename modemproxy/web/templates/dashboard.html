@@ -88,6 +88,9 @@
                       :class="m.status==='online'?'bg-emerald-400':m.status==='offline'?'bg-red-400':'bg-slate-400'"></span>
                 <span x-text="m.status"></span>
               </span>
+              <template x-if="m.quota_locked">
+                <span class="ml-1 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-500/15 text-amber-400" title="Over monthly quota">🔒 quota</span>
+              </template>
             </td>
             <td class="px-5 py-3">
               <div class="flex items-center justify-end gap-1.5">
@@ -184,6 +187,25 @@
                 </div>
               </div>
 
+              <!-- monthly quota -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">Monthly data cap
+                  <span class="text-slate-600">(MB, 0 = unlimited)</span></p>
+                <div class="flex gap-2">
+                  <input x-model.number="newQuotaMB" type="number" min="0" placeholder="0"
+                         class="w-24 bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm">
+                  <select x-model="newQuotaDir"
+                          class="flex-1 bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm">
+                    <option value="both">Down + Up</option>
+                    <option value="in">Download only</option>
+                    <option value="out">Upload only</option>
+                  </select>
+                  <button @click="setQuota(selected)" :disabled="busy"
+                          class="px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm">Save</button>
+                </div>
+                <p x-show="selected.quota_locked" class="text-xs text-red-400">⚠ Over quota — proxy auto-disabled until next month.</p>
+              </div>
+
               <!-- IP whitelist -->
               <div class="space-y-2">
                 <p class="text-xs font-medium text-slate-400">Client IP whitelist
@@ -272,6 +294,7 @@ function dashboard(){
     modems: {{ modems | tojson }},
     selected:null, busy:false, toast:'', newPw:'', newInterval:0, newWl:'',
     ussdCode:'', ussdResp:'', testResult:null, speedResult:null,
+    newQuotaMB:0, newQuotaDir:'both',
     init(){},
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
     async api(method,url,body){
@@ -290,7 +313,8 @@ function dashboard(){
     open(m){ this.selected=m; this.newPw='';
       this.newInterval=m.rotation_interval||0;
       this.newWl=(JSON.parse(m.white_list||'[]')).join('\n');
-      this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null; },
+      this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null;
+      this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both'; },
     hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
     async rotate(m){ const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
     async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); await this.refresh(); this.notify('Proxy enabled'); },
@@ -303,6 +327,7 @@ function dashboard(){
     async sendUssd(m){ if(!this.ussdCode) return; this.ussdResp='…'; const r=await this.api('POST',`/api/modems/${m.imei}/ussd`,{code:this.ussdCode}); this.ussdResp=r.response||'(empty)'; },
     async connTest(m){ this.testResult={loading:true}; this.testResult=await this.api('POST',`/api/modems/${m.imei}/conn-test`); },
     async runSpeedtest(m){ this.speedResult={loading:true}; this.speedResult=await this.api('POST',`/api/modems/${m.imei}/speedtest`); },
+    async setQuota(m){ await this.api('POST',`/api/modems/${m.imei}/quota`,{quota_bytes:Math.round(this.newQuotaMB*1048576),quota_direction:this.newQuotaDir}); await this.refresh(); this.notify(this.newQuotaMB>0?`Quota ${this.newQuotaMB} MB/mo`:'Quota off'); },
     connStrings(m){
       const a = m.username?`${m.username}:${m.password}@`:'';
       return [

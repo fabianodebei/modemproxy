@@ -126,6 +126,20 @@ def apply_port(imei: str, **alloc_kwargs) -> dict:
     return port
 
 
+def stop_proxy(imei: str, *, locked: bool = False) -> None:
+    """Stop a modem's proxy without deleting its config/credentials."""
+    modem = db.get_modem(imei) or {}
+    name = modem.get("name") or imei[-6:]
+    db.set_port(imei, enabled=0, quota_locked=1 if locked else 0)
+    _systemctl("stop", f"modemproxy-proxy@{name}.service")
+
+
+def start_proxy(imei: str) -> dict:
+    """Re-enable + start a previously stopped proxy."""
+    db.set_port(imei, quota_locked=0)
+    return apply_port(imei)
+
+
 def _systemctl(action: str, unit: str) -> None:
     try:
         subprocess.run(["systemctl", action, unit], check=False,

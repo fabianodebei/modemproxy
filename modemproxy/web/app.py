@@ -18,9 +18,11 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .. import db
 from ..config import get_config
+import random
+
 from ..modems import control, manager
 from ..proxy import generator
-from ..services import bandwidth, tests
+from ..services import bandwidth, quota, tests
 
 BASE = Path(__file__).parent
 _cfg = get_config()
@@ -232,6 +234,54 @@ def api_conn_test(imei: str, _: str = Depends(api_auth)):
 @app.post("/api/modems/{imei}/speedtest")
 def api_speedtest(imei: str, _: str = Depends(api_auth)):
     return tests.speedtest(imei)
+
+
+@app.post("/api/modems/{imei}/quota")
+async def api_set_quota(imei: str, request: Request, _: str = Depends(api_auth)):
+    body = await request.json() or {}
+    return quota.set_quota(
+        imei, int(body.get("quota_bytes", 0)), body.get("quota_direction", "both")
+    )
+
+
+@app.get("/api/modems/{imei}/quota")
+def api_quota_status(imei: str, _: str = Depends(api_auth)):
+    return quota.status(imei)
+
+
+# --- allocation pool -------------------------------------------------------
+
+def _live_proxies(request: Request) -> list[dict]:
+    host = request.url.hostname
+    out = []
+    for m in db.list_modems():
+        if (m.get("status") == "online" and m.get("http_port")
+                and m.get("enabled") and not m.get("quota_locked")):
+            cred = f"{m['username']}:{m['password']}@" if m.get("username") else ""
+            out.append({
+                "imei": m["imei"], "name": m.get("name"),
+                "operator": m.get("operator"), "ip": m.get("ip"),
+                "host": host, "http_port": m["http_port"], "socks_port": m["socks_port"],
+                "http": f"http://{cred}{host}:{m['http_port']}",
+                "socks5": f"socks5h://{cred}{host}:{m['socks_port']}",
+            })
+    return out
+
+
+@app.get("/api/pool")
+def api_pool(request: Request, operator: str | None = None, _: str = Depends(api_auth)):
+    proxies = _live_proxies(request)
+    if operator:
+        proxies = [p for p in proxies if (p.get("operator") or "").lower() == operator.lower()]
+    return proxies
+
+
+@app.get("/api/pool/random")
+def api_pool_random(request: Request, operator: str | None = None, _: str = Depends(api_auth)):
+    proxies = api_pool(request, operator, _)
+    if not proxies:
+        raise HTTPException(503, "no live proxy available")
+    return random.choice(proxies)
 
 
 # Public rotation hook — token-authenticated, no session. Lets external tools

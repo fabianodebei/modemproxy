@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS ports (
     rotation_url    TEXT,                 -- optional GET hook to trigger rotation
     rotation_token  TEXT,                 -- secret token for the public rotation hook
     white_list      TEXT,                 -- JSON list of allowed client IPs/CIDRs
+    quota_bytes     INTEGER DEFAULT 0,    -- monthly traffic cap in bytes; 0 = unlimited
+    quota_direction TEXT DEFAULT 'both',  -- in | out | both
+    quota_locked    INTEGER DEFAULT 0,    -- 1 = auto-disabled by quota check
     enabled         INTEGER DEFAULT 1,
     created_at      INTEGER
 );
@@ -89,6 +92,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ports ADD COLUMN white_list TEXT")
     if "rotation_token" not in cols:
         conn.execute("ALTER TABLE ports ADD COLUMN rotation_token TEXT")
+    if "quota_bytes" not in cols:
+        conn.execute("ALTER TABLE ports ADD COLUMN quota_bytes INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE ports ADD COLUMN quota_direction TEXT DEFAULT 'both'")
+        conn.execute("ALTER TABLE ports ADD COLUMN quota_locked INTEGER DEFAULT 0")
 
 
 @contextmanager
@@ -128,7 +135,8 @@ def list_modems() -> list[dict[str, Any]]:
     with db() as conn:
         rows = conn.execute(
             "SELECT m.*, p.http_port, p.socks_port, p.username, p.password, "
-            "p.rotation_interval, p.white_list, p.rotation_token, p.enabled "
+            "p.rotation_interval, p.white_list, p.rotation_token, "
+            "p.quota_bytes, p.quota_direction, p.quota_locked, p.enabled "
             "FROM modems m LEFT JOIN ports p ON p.imei = m.imei "
             "ORDER BY m.name"
         ).fetchall()

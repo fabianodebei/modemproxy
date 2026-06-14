@@ -101,6 +101,7 @@ systemctl enable --now modemproxy-web.service
 systemctl enable --now modemproxy-pinger.timer
 systemctl enable --now modemproxy-bandwidth.timer
 systemctl enable --now modemproxy-rotator.timer
+systemctl enable --now modemproxy-quota.timer
 
 log "Initial modem discovery"
 "$VENV/bin/modemproxy" init-db

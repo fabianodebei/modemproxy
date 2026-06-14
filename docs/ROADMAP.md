@@ -20,15 +20,18 @@ Status of feature parity with a full commercial modem-proxy manager.
 - USSD (balance checks) via ModemManager
 - Per-modem connectivity test + speedtest (egress-bound via interface)
 - Token-authenticated rotation hook URL (link rotation), from the panel
+- Monthly quota / bandwidth caps — auto lock/unlock a proxy over its cap;
+  configurable per modem from the panel
+- Allocation pool API — `/api/pool` + `/api/pool/random` hand out live proxies
+  (excludes offline / disabled / quota-locked), optional operator filter
 
 ## Next
-- **Allocation API** — Redis-backed pool endpoint that hands out a random live
-  proxy (the residential-style allocation layer).
-- **Quota / bandwidth caps** — auto-disable a proxy over its monthly quota.
+- **Sticky sessions** — keep a client on the same modem for a session window.
+- **OpenVPN per-modem export** — download a client config per modem.
+- **Prometheus metrics** — `/metrics` for signal, traffic, online count.
 
 ## Later
-- OpenVPN per-modem export
-- OS/TCP fingerprint spoofing layer
-- Multi-IP / sticky sessions
-- Prometheus metrics endpoint
+- OS/TCP fingerprint spoofing layer (p0f / osfooler)
+- Multi-IP allocation
 - Postgres backend option for multi-node
+- Redis-backed pool for cross-node allocation at scale

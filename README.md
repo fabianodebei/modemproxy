@@ -98,6 +98,19 @@ curl -x http://USER:PASS@SERVER_IP:8001 https://api.ipify.org   # HTTP
 curl -x socks5h://USER:PASS@SERVER_IP:9001 https://api.ipify.org # SOCKS5
 ```
 
+## Allocation pool API
+
+Hand out a live proxy to external tools (offline / disabled / quota-locked
+modems are excluded):
+
+```bash
+curl -u admin:PASS http://SERVER_IP:6997/api/pool          # all live proxies
+curl -u admin:PASS http://SERVER_IP:6997/api/pool/random   # one at random
+curl -u admin:PASS "http://SERVER_IP:6997/api/pool/random?operator=TIM"
+```
+
+Each entry includes ready-to-use `http` and `socks5` connection strings.
+
 ## Configuration
 
 All keys in [`docs/CONFIG.md`](docs/CONFIG.md). Edit

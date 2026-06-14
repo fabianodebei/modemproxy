@@ -1,0 +1,9 @@
+[Unit]
+Description=modemproxy monthly quota enforcement
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/modemproxy/venv/bin/modemproxy quota-check
+Environment=MODEMPROXY_CONFIG=/etc/modemproxy/config.yaml
+User=root

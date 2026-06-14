@@ -12,7 +12,7 @@ import sys
 from . import db
 from .modems import control, manager
 from .proxy import generator
-from .services import bandwidth, tests
+from .services import bandwidth, quota, tests
 
 
 def _print_json(obj) -> None:
@@ -161,6 +161,17 @@ def cmd_bw_report(args) -> int:
     return 0
 
 
+def cmd_quota_check(args) -> int:
+    actions = quota.check()
+    _print_json(actions) if args.json else print(f"{len(actions)} change(s)")
+    return 0
+
+
+def cmd_set_quota(args) -> int:
+    _print_json(quota.set_quota(args.imei, args.bytes, args.direction))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="modemproxy", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -221,6 +232,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("bw-report", cmd_bw_report, "bandwidth usage report")
     sp.add_argument("imei", nargs="?")
+
+    sp = add("quota-check", cmd_quota_check, "enforce monthly quotas (lock/unlock)")
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("set-quota", cmd_set_quota, "set monthly traffic cap (bytes; 0=off)")
+    sp.add_argument("imei")
+    sp.add_argument("bytes", type=int)
+    sp.add_argument("--direction", choices=["in", "out", "both"], default="both")
 
     sp = add("send-ussd", cmd_send_ussd, "send a USSD code (e.g. balance check)")
     sp.add_argument("imei")
