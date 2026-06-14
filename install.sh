@@ -39,9 +39,26 @@ apt-get update -qq
 apt-get install -y -qq \
     git python3 python3-venv python3-pip \
     modemmanager libqmi-utils libmbim-utils \
-    3proxy usbutils uhubctl curl ca-certificates \
-    openvpn openssl iproute2 iptables \
+    usbutils uhubctl curl ca-certificates \
+    openvpn openssl iproute2 iptables build-essential \
     || die "apt install failed"
+
+# 3proxy: try package first, fall back to build from source
+if apt-get install -y -qq 3proxy 2>/dev/null; then
+    log "3proxy installed via apt"
+elif [ -x /usr/bin/3proxy ] || [ -x /usr/local/bin/3proxy ]; then
+    log "3proxy already present"
+else
+    log "Building 3proxy from source (not in apt repos)"
+    BUILD_DIR="$(mktemp -d)"
+    git clone --quiet --depth 1 https://github.com/3proxy/3proxy.git "$BUILD_DIR"
+    make -C "$BUILD_DIR" -f Makefile.Linux -j"$(nproc)" 2>/dev/null \
+        || make -C "$BUILD_DIR" -f Makefile.Linux 2>/dev/null \
+        || die "3proxy build failed"
+    install -m 755 "$BUILD_DIR/bin/3proxy" /usr/bin/3proxy
+    rm -rf "$BUILD_DIR"
+    log "3proxy built and installed to /usr/bin/3proxy"
+fi
 
 systemctl enable --now ModemManager.service || true
 
