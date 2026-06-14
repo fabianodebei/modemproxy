@@ -142,3 +142,21 @@ def send_sms(mid: str, number: str, text: str) -> None:
     ])
     sid = create.strip().rsplit("/", 1)[-1].rstrip("'\"")
     _run(["mmcli", "-s", sid, "--send"], timeout=30)
+
+
+# --- USSD ------------------------------------------------------------------
+
+def send_ussd(mid: str, code: str) -> str:
+    """Initiate a USSD session (e.g. balance check) and return the response."""
+    out = _run(
+        ["mmcli", "-m", mid, f"--3gpp-ussd-initiate={code}", "--output-keyvalue"],
+        timeout=45,
+    )
+    kv = _kv(out)
+    resp = kv.get("modem.3gpp.ussd.network-response") or kv.get(
+        "3gpp.ussd.network-response"
+    )
+    if resp:
+        return resp
+    # fall back to plain output when key form differs across MM versions
+    return out.strip()

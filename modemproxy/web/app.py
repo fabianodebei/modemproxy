@@ -20,7 +20,7 @@ from .. import db
 from ..config import get_config
 from ..modems import control, manager
 from ..proxy import generator
-from ..services import bandwidth
+from ..services import bandwidth, tests
 
 BASE = Path(__file__).parent
 _cfg = get_config()
@@ -210,6 +210,42 @@ def api_purge(imei: str, _: str = Depends(api_auth)):
 def api_reset(imei: str, _: str = Depends(api_auth)):
     manager.reset_modem(imei)
     return {"ok": True}
+
+
+@app.post("/api/modems/{imei}/ussd")
+async def api_ussd(imei: str, request: Request, _: str = Depends(api_auth)):
+    body = await request.json()
+    code = (body or {}).get("code", "")
+    if not code:
+        raise HTTPException(400, "code required")
+    try:
+        return {"imei": imei, "response": manager.send_ussd(imei, code)}
+    except control.MMError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.post("/api/modems/{imei}/conn-test")
+def api_conn_test(imei: str, _: str = Depends(api_auth)):
+    return tests.conn_test(imei)
+
+
+@app.post("/api/modems/{imei}/speedtest")
+def api_speedtest(imei: str, _: str = Depends(api_auth)):
+    return tests.speedtest(imei)
+
+
+# Public rotation hook — token-authenticated, no session. Lets external tools
+# rotate a single proxy's IP by hitting a secret URL (link rotation).
+@app.get("/hook/rotate/{token}")
+@app.post("/hook/rotate/{token}")
+def rotation_hook(token: str):
+    port = db.get_port_by_token(token)
+    if not port:
+        raise HTTPException(404, "invalid token")
+    try:
+        return manager.rotate(port["imei"], reason="hook")
+    except control.MMError as e:
+        raise HTTPException(503, str(e))
 
 
 @app.get("/api/bandwidth")

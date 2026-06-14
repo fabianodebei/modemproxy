@@ -12,7 +12,7 @@ import sys
 from . import db
 from .modems import control, manager
 from .proxy import generator
-from .services import bandwidth
+from .services import bandwidth, tests
 
 
 def _print_json(obj) -> None:
@@ -115,6 +115,22 @@ def cmd_name(args) -> int:
     return 0
 
 
+def cmd_send_ussd(args) -> int:
+    resp = manager.send_ussd(args.imei, args.code)
+    print(resp)
+    return 0
+
+
+def cmd_conn_test(args) -> int:
+    _print_json(tests.conn_test(args.imei))
+    return 0
+
+
+def cmd_speedtest(args) -> int:
+    _print_json(tests.speedtest(args.imei))
+    return 0
+
+
 def cmd_list_sms(args) -> int:
     mid = manager._mm_id_for(args.imei)
     if not mid:
@@ -205,6 +221,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = add("bw-report", cmd_bw_report, "bandwidth usage report")
     sp.add_argument("imei", nargs="?")
+
+    sp = add("send-ussd", cmd_send_ussd, "send a USSD code (e.g. balance check)")
+    sp.add_argument("imei")
+    sp.add_argument("code", help="USSD string, e.g. '*123#'")
+
+    sp = add("conn-test", cmd_conn_test, "check public IP via a modem")
+    sp.add_argument("imei")
+
+    sp = add("speedtest", cmd_speedtest, "measure download speed via a modem")
+    sp.add_argument("imei")
 
     sp = add("list-sms", cmd_list_sms, "list SMS on a modem")
     sp.add_argument("imei")

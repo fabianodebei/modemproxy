@@ -17,14 +17,14 @@ Status of feature parity with a full commercial modem-proxy manager.
 - SMS list/send via ModemManager
 - systemd units (bandwidth + pinger + rotator timers), udev auto-discovery,
   one-command installer
+- USSD (balance checks) via ModemManager
+- Per-modem connectivity test + speedtest (egress-bound via interface)
+- Token-authenticated rotation hook URL (link rotation), from the panel
 
 ## Next
-- **USSD** — balance checks (`send_ussd_json`).
-- **Connectivity tests / speedtest** — per-modem `conn_test`, `speedtest`,
-  `test_proxy_http`.
-- **Rotation hooks** — trigger rotation via authenticated URL (link rotation).
 - **Allocation API** — Redis-backed pool endpoint that hands out a random live
   proxy (the residential-style allocation layer).
+- **Quota / bandwidth caps** — auto-disable a proxy over its monthly quota.
 
 ## Later
 - OpenVPN per-modem export

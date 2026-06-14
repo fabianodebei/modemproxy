@@ -38,8 +38,10 @@ def allocate_port(imei: str, *, username: str | None = None,
         password = password or (existing or {}).get("password") or secrets.token_hex(8)
     else:
         username = password = None
+    token = (existing or {}).get("rotation_token") or secrets.token_urlsafe(18)
     db.set_port(imei, http_port=http_port, socks_port=socks_port,
-                username=username, password=password, enabled=1)
+                username=username, password=password,
+                rotation_token=token, enabled=1)
     return db.get_port(imei)
 
 

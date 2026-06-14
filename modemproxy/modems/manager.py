@@ -98,3 +98,10 @@ def reset_modem(imei: str) -> None:
     if not mid:
         raise control.MMError(f"modem {imei} not present")
     control.reset(mid)
+
+
+def send_ussd(imei: str, code: str) -> str:
+    mid = _mm_id_for(imei)
+    if not mid:
+        raise control.MMError(f"modem {imei} not present")
+    return control.send_ussd(mid, code)

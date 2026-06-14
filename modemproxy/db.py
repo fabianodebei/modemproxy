@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS ports (
     password        TEXT,
     rotation_interval INTEGER DEFAULT 0,  -- seconds; 0 = manual
     rotation_url    TEXT,                 -- optional GET hook to trigger rotation
+    rotation_token  TEXT,                 -- secret token for the public rotation hook
     white_list      TEXT,                 -- JSON list of allowed client IPs/CIDRs
     enabled         INTEGER DEFAULT 1,
     created_at      INTEGER
@@ -86,6 +87,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(ports)")}
     if "white_list" not in cols:
         conn.execute("ALTER TABLE ports ADD COLUMN white_list TEXT")
+    if "rotation_token" not in cols:
+        conn.execute("ALTER TABLE ports ADD COLUMN rotation_token TEXT")
 
 
 @contextmanager
@@ -125,7 +128,7 @@ def list_modems() -> list[dict[str, Any]]:
     with db() as conn:
         rows = conn.execute(
             "SELECT m.*, p.http_port, p.socks_port, p.username, p.password, "
-            "p.rotation_interval, p.white_list, p.enabled "
+            "p.rotation_interval, p.white_list, p.rotation_token, p.enabled "
             "FROM modems m LEFT JOIN ports p ON p.imei = m.imei "
             "ORDER BY m.name"
         ).fetchall()
@@ -162,6 +165,16 @@ def get_port(imei: str) -> dict[str, Any] | None:
 def delete_port(imei: str) -> None:
     with db() as conn:
         conn.execute("DELETE FROM ports WHERE imei=?", (imei,))
+
+
+def get_port_by_token(token: str) -> dict[str, Any] | None:
+    if not token:
+        return None
+    with db() as conn:
+        r = conn.execute(
+            "SELECT * FROM ports WHERE rotation_token=?", (token,)
+        ).fetchone()
+        return dict(r) if r else None
 
 
 def log_rotation(imei: str, old_ip: str | None, new_ip: str | None, reason: str) -> None:

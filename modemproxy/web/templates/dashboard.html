@@ -194,6 +194,53 @@
                         class="px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm">Save whitelist</button>
               </div>
 
+              <!-- diagnostics -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">Diagnostics</p>
+                <div class="flex gap-2">
+                  <button @click="connTest(selected)" :disabled="busy"
+                          class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Test connection</button>
+                  <button @click="runSpeedtest(selected)" :disabled="busy"
+                          class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Speedtest</button>
+                </div>
+                <template x-if="testResult">
+                  <p class="text-xs font-mono" :class="testResult.ok?'text-emerald-400':'text-red-400'">
+                    <span x-show="testResult.loading">testing…</span>
+                    <span x-show="!testResult.loading && testResult.ok" x-text="`IP ${testResult.ip} · ${testResult.latency_ms}ms`"></span>
+                    <span x-show="!testResult.loading && !testResult.ok" x-text="`failed: ${testResult.error}`"></span>
+                  </p>
+                </template>
+                <template x-if="speedResult">
+                  <p class="text-xs font-mono" :class="speedResult.ok===false?'text-red-400':'text-brand-400'">
+                    <span x-show="speedResult.loading">running…</span>
+                    <span x-show="!speedResult.loading && speedResult.ok" x-text="`${speedResult.mbps} Mbps`"></span>
+                    <span x-show="!speedResult.loading && speedResult.ok===false" x-text="`failed: ${speedResult.error}`"></span>
+                  </p>
+                </template>
+              </div>
+
+              <!-- USSD -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">USSD (e.g. balance)</p>
+                <div class="flex gap-2">
+                  <input x-model="ussdCode" placeholder="*123#"
+                         class="flex-1 bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm font-mono">
+                  <button @click="sendUssd(selected)" :disabled="busy||!ussdCode"
+                          class="px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white text-sm">Send</button>
+                </div>
+                <p x-show="ussdResp" class="text-xs bg-ink-700/50 rounded-lg px-3 py-2 whitespace-pre-wrap" x-text="ussdResp"></p>
+              </div>
+
+              <!-- rotation hook -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">Rotation hook URL
+                  <span class="text-slate-600">(GET to rotate, no login)</span></p>
+                <div class="flex items-center gap-2 bg-ink-700/50 rounded-lg px-3 py-2">
+                  <code class="text-xs flex-1 truncate" x-text="hookUrl(selected)"></code>
+                  <button @click="copy(hookUrl(selected))" class="text-slate-500 hover:text-brand-400" title="Copy">⧉</button>
+                </div>
+              </div>
+
               <div class="flex gap-2 pt-2">
                 <button @click="rotate(selected)" :disabled="busy" class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Rotate IP</button>
                 <button @click="reset(selected)" :disabled="busy" class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Reset modem</button>
@@ -224,6 +271,7 @@ function dashboard(){
   return {
     modems: {{ modems | tojson }},
     selected:null, busy:false, toast:'', newPw:'', newInterval:0, newWl:'',
+    ussdCode:'', ussdResp:'', testResult:null, speedResult:null,
     init(){},
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
     async api(method,url,body){
@@ -241,7 +289,9 @@ function dashboard(){
     async discover(){ await this.api('POST','/api/discover'); await this.refresh(); this.notify('Discovery complete'); },
     open(m){ this.selected=m; this.newPw='';
       this.newInterval=m.rotation_interval||0;
-      this.newWl=(JSON.parse(m.white_list||'[]')).join('\n'); },
+      this.newWl=(JSON.parse(m.white_list||'[]')).join('\n');
+      this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null; },
+    hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
     async rotate(m){ const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
     async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); await this.refresh(); this.notify('Proxy enabled'); },
     async purge(m){ await this.api('DELETE',`/api/modems/${m.imei}/port`); await this.refresh(); this.notify('Proxy disabled'); },
@@ -250,6 +300,9 @@ function dashboard(){
     async regenerate(m){ await this.api('POST',`/api/modems/${m.imei}/regenerate`); await this.refresh(); this.notify('Credentials regenerated'); },
     async setInterval(m){ await this.api('POST',`/api/modems/${m.imei}/rotation-interval`,{seconds:this.newInterval}); await this.refresh(); this.notify(this.newInterval>0?`Auto-rotate every ${this.newInterval}s`:'Auto-rotate off'); },
     async setWhitelist(m){ const ips=this.newWl.split('\n').map(s=>s.trim()).filter(Boolean); await this.api('POST',`/api/modems/${m.imei}/whitelist`,{ips}); await this.refresh(); this.notify(ips.length?`Whitelist: ${ips.length} IP(s)`:'Whitelist cleared'); },
+    async sendUssd(m){ if(!this.ussdCode) return; this.ussdResp='…'; const r=await this.api('POST',`/api/modems/${m.imei}/ussd`,{code:this.ussdCode}); this.ussdResp=r.response||'(empty)'; },
+    async connTest(m){ this.testResult={loading:true}; this.testResult=await this.api('POST',`/api/modems/${m.imei}/conn-test`); },
+    async runSpeedtest(m){ this.speedResult={loading:true}; this.speedResult=await this.api('POST',`/api/modems/${m.imei}/speedtest`); },
     connStrings(m){
       const a = m.username?`${m.username}:${m.password}@`:'';
       return [
