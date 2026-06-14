@@ -92,9 +92,23 @@ python3 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet "$SRC"
 ln -sf "$VENV/bin/modemproxy" /usr/local/bin/modemproxy
 
+log "Setting up modemproxy group"
+groupadd -f modemproxy
+# Add the human who invoked sudo to the group, so CLI works without sudo
+TARGET_USER="${SUDO_USER:-}"
+if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
+    usermod -aG modemproxy "$TARGET_USER" || true
+fi
+
 log "Writing config"
 mkdir -p "$CONF_DIR/autogen"
 mkdir -p /var/lib/modemproxy /var/log/modemproxy
+# Group-readable state so non-root group members can use the CLI.
+# DB dir is group-writable + setgid so the CLI (as a group member) can
+# write modemproxy.db and new files inherit the modemproxy group.
+chgrp -R modemproxy "$CONF_DIR" /var/lib/modemproxy /var/log/modemproxy || true
+chmod 750 "$CONF_DIR" "$CONF_DIR/autogen" /var/log/modemproxy || true
+chmod 2770 /var/lib/modemproxy || true
 if [ ! -f "$CONF" ]; then
     PW="$(head -c12 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c16)"
     SECRET="$(head -c32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c40)"
@@ -113,9 +127,11 @@ bind_address: 0.0.0.0
 rotation_default_interval: 0
 dns_servers: []
 EOF
-    chmod 600 "$CONF"
     GENERATED_PW="$PW"
 fi
+# config holds admin_password + session_secret: root-write, group-read only
+chown root:modemproxy "$CONF" || true
+chmod 640 "$CONF" || true
 
 log "Installing systemd units + udev rules"
 cp "$SRC/systemd/"*.service "$SRC/systemd/"*.timer /etc/systemd/system/
@@ -131,6 +147,9 @@ systemctl enable --now modemproxy-quota.timer
 log "Initial modem discovery"
 "$VENV/bin/modemproxy" init-db
 "$VENV/bin/modemproxy" discover || true
+# DB created by root above: make it group read/write for the CLI
+chgrp -R modemproxy /var/lib/modemproxy || true
+chmod -R g+rw /var/lib/modemproxy || true
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
