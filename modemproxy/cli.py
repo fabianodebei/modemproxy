@@ -172,6 +172,22 @@ def cmd_send_sms(args) -> int:
     return 0
 
 
+def cmd_apikey_create(args) -> int:
+    print(db.api_key_create(args.label or ""))
+    return 0
+
+
+def cmd_apikey_list(args) -> int:
+    _print_json(db.api_key_list())
+    return 0
+
+
+def cmd_apikey_revoke(args) -> int:
+    ok = db.api_key_revoke(args.key)
+    print("revoked" if ok else "not found")
+    return 0 if ok else 1
+
+
 def cmd_bw_sample(args) -> int:
     n = bandwidth.sample()
     print(f"sampled {n} interface(s)")
@@ -249,6 +265,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("name", cmd_name, "set a friendly nick for a modem")
     sp.add_argument("imei")
     sp.add_argument("name")
+
+    sp = add("apikey-create", cmd_apikey_create, "create an API key for pool consumers")
+    sp.add_argument("--label", help="note for this key")
+    add("apikey-list", cmd_apikey_list, "list API keys")
+    sp = add("apikey-revoke", cmd_apikey_revoke, "revoke an API key")
+    sp.add_argument("key")
 
     add("bw-sample", cmd_bw_sample, "record one bandwidth counter sample")
 

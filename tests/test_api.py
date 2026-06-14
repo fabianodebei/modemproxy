@@ -76,3 +76,28 @@ def test_sticky_is_consistent(client, modem):
 
 def test_rotation_hook_bad_token(client):
     assert client.get("/hook/rotate/bad").status_code == 404
+
+
+def test_api_key_auth_flow(client, modem):
+    # create a key via admin basic auth
+    r = client.post("/api/keys", headers=AUTH, json={"label": "scraper"})
+    key = r.json()["key"]
+    assert key.startswith("mk_")
+    # use the key (no admin creds) on a normal API endpoint
+    r2 = client.get("/api/modems", headers={"Authorization": f"Bearer {key}"})
+    assert r2.status_code == 200
+    # x-api-key header form also works
+    r3 = client.get("/api/pool", headers={"X-API-Key": key})
+    assert r3.status_code == 200
+
+
+def test_api_key_cannot_manage_keys(client, modem):
+    key = client.post("/api/keys", headers=AUTH, json={}).json()["key"]
+    # an API key must not be able to list/create keys (admin-only)
+    assert client.get("/api/keys", headers={"Authorization": f"Bearer {key}"}).status_code == 401
+
+
+def test_revoked_key_rejected(client):
+    key = client.post("/api/keys", headers=AUTH, json={}).json()["key"]
+    client.delete(f"/api/keys/{key}", headers=AUTH)
+    assert client.get("/api/modems", headers={"X-API-Key": key}).status_code == 401

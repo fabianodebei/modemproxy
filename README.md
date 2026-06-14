@@ -120,6 +120,14 @@ curl -u admin:PASS "http://SERVER_IP:6997/api/pool/random?operator=TIM"
 
 Each entry includes ready-to-use `http` and `socks5` connection strings.
 
+**API keys** — pool consumers can authenticate without the admin password.
+Create one on the **Settings** page or via `modemproxy apikey-create`, then:
+
+```bash
+curl -H "Authorization: Bearer mk_xxx" http://SERVER_IP:6997/api/pool/random
+# or:  -H "X-API-Key: mk_xxx"
+```
+
 **Sticky sessions** — keep one caller on the same modem for a TTL window:
 
 ```bash

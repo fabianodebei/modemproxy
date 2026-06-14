@@ -84,10 +84,15 @@ def ui_auth(request: Request):
 
 
 def api_auth(request: Request) -> str:
-    """API guard: accept session cookie OR HTTP basic auth."""
+    """API guard: accept session cookie, API key, or HTTP basic auth."""
     if request.session.get("user"):
         return request.session["user"]
     header = request.headers.get("authorization", "")
+    api_key = request.headers.get("x-api-key", "")
+    if header.startswith("Bearer "):
+        api_key = header[7:].strip()
+    if api_key and db.api_key_valid(api_key):
+        return "apikey"
     if header.startswith("Basic "):
         try:
             raw = base64.b64decode(header[6:]).decode()
@@ -101,6 +106,21 @@ def api_auth(request: Request) -> str:
         status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized",
         headers={"WWW-Authenticate": "Basic"},
     )
+
+
+def admin_auth(request: Request) -> str:
+    """Stricter guard for sensitive ops: session or basic admin only (no API key)."""
+    if request.session.get("user"):
+        return request.session["user"]
+    header = request.headers.get("authorization", "")
+    if header.startswith("Basic "):
+        try:
+            user, _, pw = base64.b64decode(header[6:]).decode().partition(":")
+        except Exception:
+            user = pw = ""
+        if _check_credentials(user, pw):
+            return user
+    raise HTTPException(401, "Unauthorized", headers={"WWW-Authenticate": "Basic"})
 
 
 class _RedirectToLogin(Exception):
@@ -163,6 +183,13 @@ def pool_page(request: Request, user: str = Depends(ui_auth)):
     return templates.TemplateResponse(
         request, "pool.html",
         {"user": user, "proxies": _live_proxies(request)},
+    )
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, user: str = Depends(ui_auth)):
+    return templates.TemplateResponse(
+        request, "settings.html", {"user": user, "keys": db.api_key_list()},
     )
 
 
@@ -386,6 +413,24 @@ def api_bw_series(imei: str, hours: int = 24, _: str = Depends(api_auth)):
 @app.get("/api/rotation-log")
 def api_rotlog(imei: str | None = None, limit: int = 100, _: str = Depends(api_auth)):
     return db.rotation_log(imei, limit)
+
+
+@app.get("/api/keys")
+def api_keys_list(_: str = Depends(admin_auth)):
+    return db.api_key_list()
+
+
+@app.post("/api/keys")
+async def api_keys_create(request: Request, _: str = Depends(admin_auth)):
+    body = await request.json() if await request.body() else {}
+    return {"key": db.api_key_create((body or {}).get("label", ""))}
+
+
+@app.delete("/api/keys/{key}")
+def api_keys_revoke(key: str, _: str = Depends(admin_auth)):
+    if not db.api_key_revoke(key):
+        raise HTTPException(404, "not found")
+    return {"ok": True}
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

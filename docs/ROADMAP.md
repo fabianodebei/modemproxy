@@ -30,11 +30,13 @@ Status of feature parity with a full commercial modem-proxy manager.
 - Web panel: Pool page (live proxies + copy) and Activity page (rotation log)
 - OpenVPN per-modem export — internal EC CA, per-modem server instance +
   policy-routed egress, single-file `.ovpn` download from the panel
+- API keys — pool consumers authenticate via `Bearer`/`X-API-Key` without the
+  admin password; managed from the Settings page
+- Test suite (37 tests) + GitHub Actions CI (py3.10/3.12)
 
 ## Next
 - **OS/TCP fingerprint spoofing layer** (p0f / osfooler) — last major
   ProxySmart parity item.
-- **API keys** — let pool consumers authenticate without the admin password.
 
 ## Later
 - Multi-IP allocation / sticky IP pinning

@@ -1,0 +1,75 @@
+{% extends "app_base.html" %}
+{% set active = 'settings' %}
+{% block title %}Settings · modemproxy{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block main %}
+<div x-data="keys()" x-init="init()" class="max-w-2xl">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-sm font-medium text-slate-200">API keys</h2>
+        <p class="text-xs text-slate-500">For pool consumers — pass as
+          <code>Authorization: Bearer &lt;key&gt;</code> or <code>X-API-Key</code>.</p>
+      </div>
+      <div class="flex gap-2">
+        <input x-model="label" placeholder="label (optional)"
+               class="bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        <button @click="create()" :disabled="busy"
+                class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-3 py-1.5 text-sm">Create</button>
+      </div>
+    </div>
+
+    <p x-show="fresh" x-cloak class="mb-3 text-xs bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg px-3 py-2">
+      New key (copy now): <code class="font-mono" x-text="fresh"></code>
+      <button @click="copy(fresh)" class="ml-2 underline">copy</button>
+    </p>
+
+    <table class="w-full text-sm">
+      <thead class="text-xs uppercase text-slate-500 border-b border-ink-700">
+        <tr><th class="text-left font-medium py-2">Label</th>
+            <th class="text-left font-medium py-2">Key</th>
+            <th class="text-left font-medium py-2">Last used</th>
+            <th></th></tr>
+      </thead>
+      <tbody class="divide-y divide-ink-700">
+        <template x-if="list.length===0">
+          <tr><td colspan="4" class="py-6 text-center text-slate-500">No API keys.</td></tr>
+        </template>
+        <template x-for="k in list" :key="k.key">
+          <tr>
+            <td class="py-2" x-text="k.label || '—'"></td>
+            <td class="py-2 font-mono text-xs text-slate-400" x-text="k.key.slice(0,10)+'…'"></td>
+            <td class="py-2 text-xs text-slate-500" x-text="k.last_used ? new Date(k.last_used*1000).toLocaleString() : 'never'"></td>
+            <td class="py-2 text-right">
+              <button @click="revoke(k.key)" class="text-red-400 hover:text-red-300 text-xs">Revoke</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <div x-show="toast" x-cloak x-transition style="display:none"
+       class="fixed bottom-5 right-5 z-50 bg-ink-700 border border-ink-600 rounded-xl px-4 py-3 text-sm shadow-xl">
+    <span x-text="toast"></span>
+  </div>
+</div>
+
+<script>
+function keys(){
+  return {
+    list: {{ keys | tojson }}, label:'', fresh:'', busy:false, toast:'',
+    init(){},
+    notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2000); },
+    async refresh(){ this.list=await (await fetch('/api/keys')).json(); },
+    async create(){ this.busy=true;
+      try{ const r=await (await fetch('/api/keys',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:this.label})})).json();
+        this.fresh=r.key; this.label=''; await this.refresh(); this.notify('Key created'); }
+      finally{ this.busy=false; } },
+    async revoke(k){ await fetch('/api/keys/'+encodeURIComponent(k),{method:'DELETE'}); if(this.fresh.startsWith(k.slice(0,5)))this.fresh=''; await this.refresh(); this.notify('Revoked'); },
+    copy(t){ navigator.clipboard.writeText(t); this.notify('Copied'); },
+  }
+}
+</script>
+{% endblock %}

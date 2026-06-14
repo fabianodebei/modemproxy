@@ -73,6 +73,13 @@ CREATE TABLE IF NOT EXISTS sticky (
     imei            TEXT REFERENCES modems(imei) ON DELETE CASCADE,
     expires_at      INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    key             TEXT PRIMARY KEY,    -- secret token
+    label           TEXT,                -- human note (e.g. "scraper-1")
+    created_at      INTEGER,
+    last_used       INTEGER
+);
 """
 
 
@@ -210,6 +217,42 @@ def sticky_set(key: str, imei: str, ttl: int) -> None:
 def sticky_purge_expired() -> None:
     with db() as conn:
         conn.execute("DELETE FROM sticky WHERE expires_at < ?", (now(),))
+
+
+def api_key_create(label: str = "") -> str:
+    import secrets
+    key = "mk_" + secrets.token_urlsafe(24)
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO api_keys (key, label, created_at) VALUES (?,?,?)",
+            (key, label, now()),
+        )
+    return key
+
+
+def api_key_list() -> list[dict[str, Any]]:
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT key, label, created_at, last_used FROM api_keys ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def api_key_revoke(key: str) -> bool:
+    with db() as conn:
+        cur = conn.execute("DELETE FROM api_keys WHERE key=?", (key,))
+        return cur.rowcount > 0
+
+
+def api_key_valid(key: str) -> bool:
+    if not key:
+        return False
+    with db() as conn:
+        r = conn.execute("SELECT key FROM api_keys WHERE key=?", (key,)).fetchone()
+        if r:
+            conn.execute("UPDATE api_keys SET last_used=? WHERE key=?", (now(), key))
+            return True
+    return False
 
 
 def get_port_by_token(token: str) -> dict[str, Any] | None:
