@@ -122,6 +122,7 @@ def purge_port(imei: str) -> None:
     cfg_file.unlink(missing_ok=True)
     _systemctl("stop", f"modemproxy-proxy@{name}.service")
     _systemctl("disable", f"modemproxy-proxy@{name}.service")
+    _publish_sync()
 
 
 def apply_port(imei: str, **alloc_kwargs) -> dict:
@@ -142,6 +143,7 @@ def apply_port(imei: str, **alloc_kwargs) -> dict:
     name = modem.get("name") or imei[-6:]
     _systemctl("enable", f"modemproxy-proxy@{name}.service")
     _systemctl("restart", f"modemproxy-proxy@{name}.service")
+    _publish_sync()
     return port
 
 
@@ -151,12 +153,23 @@ def stop_proxy(imei: str, *, locked: bool = False) -> None:
     name = modem.get("name") or imei[-6:]
     db.set_port(imei, enabled=0, quota_locked=1 if locked else 0)
     _systemctl("stop", f"modemproxy-proxy@{name}.service")
+    _publish_sync()
 
 
 def start_proxy(imei: str) -> dict:
     """Re-enable + start a previously stopped proxy."""
     db.set_port(imei, quota_locked=0)
     return apply_port(imei)
+
+
+def _publish_sync() -> None:
+    """Keep remote-access plumbing (firewall / frpc tunnel) in sync with the
+    live proxy set. Best-effort: never let it break a proxy operation."""
+    try:
+        from ..services import publish
+        publish.sync()
+    except Exception:
+        pass
 
 
 def _systemctl(action: str, unit: str) -> None:

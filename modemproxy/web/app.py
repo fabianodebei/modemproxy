@@ -190,8 +190,21 @@ def pool_page(request: Request, user: str = Depends(ui_auth)):
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, user: str = Depends(ui_auth)):
+    from ..services import publish
+    cfg = get_config()
+    access = {
+        "access_mode": cfg.access_mode,
+        "public_host": cfg.public_host,
+        "open_firewall": cfg.open_firewall,
+        "relay_host": cfg.relay_host,
+        "relay_port": cfg.relay_port,
+        "relay_token": cfg.relay_token,
+        "relay_remote_offset": cfg.relay_remote_offset,
+    }
     return templates.TemplateResponse(
-        request, "settings.html", {"user": user, "keys": db.api_key_list()},
+        request, "settings.html",
+        {"user": user, "keys": db.api_key_list(),
+         "access": access, "publish": publish.status()},
     )
 
 
@@ -433,6 +446,28 @@ def api_keys_revoke(key: str, _: str = Depends(admin_auth)):
     if not db.api_key_revoke(key):
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+@app.get("/api/access")
+def api_access_status(_: str = Depends(api_auth)):
+    from ..services import publish
+    return publish.status()
+
+
+@app.post("/api/access")
+async def api_access_update(request: Request, _: str = Depends(admin_auth)):
+    """Update remote-access settings (mode + relay creds) and re-sync."""
+    from ..config import update_config
+    from ..services import publish
+    body = await request.json() if await request.body() else {}
+    allowed = {"access_mode", "public_host", "open_firewall", "relay_host",
+               "relay_port", "relay_token", "relay_remote_offset"}
+    updates = {k: v for k, v in (body or {}).items() if k in allowed}
+    if updates.get("access_mode") not in (None, "direct", "relay"):
+        raise HTTPException(400, "access_mode must be 'direct' or 'relay'")
+    update_config(updates)
+    result = publish.sync()
+    return {"ok": True, "sync": result, "status": publish.status()}
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

@@ -4,6 +4,74 @@
 {% block page_title %}Settings{% endblock %}
 
 {% block main %}
+<div x-data="access()" class="max-w-2xl mb-6">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <div class="mb-4">
+      <h2 class="text-sm font-medium text-slate-200">Remote access</h2>
+      <p class="text-xs text-slate-500">How customers reach the proxies from outside.</p>
+    </div>
+
+    <div class="flex gap-2 mb-4">
+      <button @click="mode='direct'" :class="mode==='direct' ? 'bg-brand-500 text-white' : 'bg-ink-700 text-slate-300'"
+              class="rounded-lg px-3 py-1.5 text-sm">Direct (public IP)</button>
+      <button @click="mode='relay'" :class="mode==='relay' ? 'bg-brand-500 text-white' : 'bg-ink-700 text-slate-300'"
+              class="rounded-lg px-3 py-1.5 text-sm">Relay (behind NAT)</button>
+    </div>
+
+    <div x-show="mode==='direct'" class="space-y-3">
+      <label class="block text-xs text-slate-400">Public IP / hostname
+        <input x-model="public_host" placeholder="e.g. 203.0.113.10 or proxy.example.com"
+               class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+      </label>
+      <label class="flex items-center gap-2 text-xs text-slate-400">
+        <input type="checkbox" x-model="open_firewall"> auto-open proxy ports in ufw
+      </label>
+    </div>
+
+    <div x-show="mode==='relay'" x-cloak class="space-y-3">
+      <label class="block text-xs text-slate-400">Relay VPS host
+        <input x-model="relay_host" placeholder="frps VPS public IP / hostname"
+               class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+      </label>
+      <div class="flex gap-2">
+        <label class="block text-xs text-slate-400 w-28">Relay port
+          <input x-model.number="relay_port" type="number"
+                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+        <label class="block text-xs text-slate-400 flex-1">Token
+          <input x-model="relay_token" placeholder="shared with frps"
+                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+        <label class="block text-xs text-slate-400 w-28">Port offset
+          <input x-model.number="relay_remote_offset" type="number"
+                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+      </div>
+    </div>
+
+    <div class="mt-4 flex items-center gap-3">
+      <button @click="save()" :disabled="busy"
+              class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-4 py-1.5 text-sm">Save & apply</button>
+      <span x-show="saved" x-cloak class="text-xs text-emerald-300">Saved ✓</span>
+    </div>
+
+    <template x-if="proxies.length">
+      <div class="mt-5 border-t border-ink-700 pt-4">
+        <p class="text-xs text-slate-500 mb-2">Customer addresses:</p>
+        <div class="space-y-1">
+          <template x-for="p in proxies" :key="p.imei">
+            <div class="text-xs font-mono text-slate-300 flex items-center gap-2">
+              <span class="text-slate-500" x-text="(p.name||p.imei)+':'"></span>
+              <span x-text="p.http"></span>
+              <button @click="copy(p.http)" class="text-brand-400 hover:text-brand-300">copy</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
 <div x-data="keys()" x-init="init()" class="max-w-2xl">
   <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
     <div class="flex items-center justify-between mb-4">
@@ -57,6 +125,35 @@
 </div>
 
 <script>
+function access(){
+  const a = {{ access | tojson }};
+  const pub = {{ publish | tojson }};
+  return {
+    mode: a.access_mode||'direct',
+    public_host: a.public_host||'',
+    open_firewall: a.open_firewall,
+    relay_host: a.relay_host||'',
+    relay_port: a.relay_port||7000,
+    relay_token: a.relay_token||'',
+    relay_remote_offset: a.relay_remote_offset||0,
+    proxies: pub.proxies||[],
+    busy:false, saved:false, _t:null,
+    async save(){
+      this.busy=true; this.saved=false;
+      try{
+        const r=await (await fetch('/api/access',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({access_mode:this.mode,public_host:this.public_host,
+            open_firewall:this.open_firewall,relay_host:this.relay_host,
+            relay_port:this.relay_port,relay_token:this.relay_token,
+            relay_remote_offset:this.relay_remote_offset})})).json();
+        this.proxies=(r.status&&r.status.proxies)||this.proxies;
+        this.saved=true; clearTimeout(this._t); this._t=setTimeout(()=>this.saved=false,2500);
+      } finally { this.busy=false; }
+    },
+    copy(t){ if(t) navigator.clipboard.writeText(t); },
+  }
+}
 function keys(){
   return {
     list: {{ keys | tojson }}, label:'', fresh:'', busy:false, toast:'',

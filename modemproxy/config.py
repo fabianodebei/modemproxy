@@ -44,6 +44,21 @@ class Config:
     # OpenVPN export
     vpn_public_host: str = ""   # public IP/host clients dial; blank = placeholder
 
+    # Remote access for customers (how external clients reach the proxies)
+    #   direct  -> box has a public/static IP (or a forwarded port); customers
+    #              connect straight to public_host:<proxy port>.
+    #   relay   -> box is behind NAT/CGNAT; an frpc reverse tunnel exposes each
+    #              proxy on a relay VPS running frps. Customers connect to
+    #              relay_host:<remote port>.
+    access_mode: str = "direct"           # direct | relay
+    public_host: str = ""                 # static IP / DDNS hostname (direct mode)
+    open_firewall: bool = True            # auto `ufw allow` proxy ports (direct)
+    relay_host: str = ""                  # frps VPS host (relay mode)
+    relay_port: int = 7000               # frps bind port
+    relay_token: str = ""                 # shared auth token with frps
+    relay_remote_offset: int = 0          # remote_port = local_port + offset
+                                          # (lets several boxes share one relay)
+
     # Database
     db_path: str = str(STATE_DIR / "modemproxy.db")
 
@@ -69,3 +84,21 @@ def get_config(reload: bool = False) -> Config:
     if _cached is None or reload:
         _cached = Config.load()
     return _cached
+
+
+def update_config(updates: dict[str, Any], path: str | os.PathLike[str] | None = None) -> Config:
+    """Merge keys into the YAML config file and reload the cached config.
+
+    Only keys defined on Config are written; everything else is ignored.
+    """
+    p = Path(path or DEFAULT_CONFIG_PATH)
+    data: dict[str, Any] = {}
+    if p.exists():
+        data = yaml.safe_load(p.read_text()) or {}
+    known = {f for f in Config.__dataclass_fields__}
+    for k, v in updates.items():
+        if k in known:
+            data[k] = v
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False))
+    return get_config(reload=True)

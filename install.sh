@@ -65,6 +65,33 @@ else
     log "3proxy built and installed to /usr/bin/3proxy"
 fi
 
+# frp (frpc/frps): reverse-tunnel relay for boxes behind NAT/CGNAT.
+# Bundled so 'relay' remote-access mode works out of the box.
+if ! command -v frpc >/dev/null 2>&1; then
+    log "Installing frp (reverse tunnel)"
+    case "$(uname -m)" in
+        x86_64|amd64)   FRP_ARCH=amd64 ;;
+        aarch64|arm64)  FRP_ARCH=arm64 ;;
+        armv7l|armv6l)  FRP_ARCH=arm ;;
+        *)              FRP_ARCH=amd64 ;;
+    esac
+    FRP_VER="${FRP_VERSION:-0.61.1}"
+    FRP_TGZ="frp_${FRP_VER}_linux_${FRP_ARCH}.tar.gz"
+    FRP_DIR="$(mktemp -d)"
+    if curl -fsSL "https://github.com/fatedier/frp/releases/download/v${FRP_VER}/${FRP_TGZ}" \
+            -o "$FRP_DIR/frp.tgz" && tar -xzf "$FRP_DIR/frp.tgz" -C "$FRP_DIR"; then
+        SRCBIN="$(find "$FRP_DIR" -maxdepth 2 -name frpc -type f | head -1)"
+        if [ -n "$SRCBIN" ]; then
+            install -m 755 "$(dirname "$SRCBIN")/frpc" /usr/local/bin/frpc
+            install -m 755 "$(dirname "$SRCBIN")/frps" /usr/local/bin/frps 2>/dev/null || true
+            log "frp installed (frpc/frps) v${FRP_VER}"
+        fi
+    else
+        log "frp download failed (relay mode unavailable until installed)"
+    fi
+    rm -rf "$FRP_DIR"
+fi
+
 systemctl enable --now ModemManager.service || true
 
 log "Fetching modemproxy source ($BRANCH)"
@@ -126,6 +153,19 @@ bind_address: 0.0.0.0
 
 rotation_default_interval: 0
 dns_servers: []
+
+# --- Remote access for customers ---------------------------------------
+# direct: this box has a public/static IP (or a forwarded port).
+#         Set public_host to that IP/hostname.
+# relay : this box is behind NAT/CGNAT. Point it at a relay VPS running frps
+#         (set relay_host/relay_port/relay_token), no router config needed.
+access_mode: direct
+public_host: ""
+open_firewall: true
+relay_host: ""
+relay_port: 7000
+relay_token: ""
+relay_remote_offset: 0
 EOF
     GENERATED_PW="$PW"
 fi

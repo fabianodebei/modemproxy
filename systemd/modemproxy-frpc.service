@@ -1,0 +1,14 @@
+[Unit]
+Description=modemproxy reverse tunnel (frpc) to the relay VPS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/frpc -c /etc/modemproxy/frpc.toml
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -12,7 +12,7 @@ import sys
 from . import db
 from .modems import control, manager
 from .proxy import generator
-from .services import bandwidth, openvpn, quota, tests
+from .services import bandwidth, openvpn, publish, quota, tests
 
 
 def _print_json(obj) -> None:
@@ -210,6 +210,27 @@ def cmd_set_quota(args) -> int:
     return 0
 
 
+def cmd_publish_status(args) -> int:
+    st = publish.status()
+    if args.json:
+        _print_json(st)
+        return 0
+    print(f"mode: {st['mode']}   host: {st['host']}")
+    if st["mode"] == "relay":
+        print(f"relay: {st.get('relay_host')}:{st.get('relay_port')}  "
+              f"frpc active={st.get('frpc_active')} installed={st.get('frpc_installed')}")
+    for m in st["proxies"]:
+        print(f"  {m.get('name') or m['imei']:<14} HTTP {m.get('http') or '-'}")
+        if m.get("socks5"):
+            print(f"  {'':<14} SOCKS {m['socks5']}")
+    return 0
+
+
+def cmd_publish_sync(args) -> int:
+    _print_json(publish.sync())
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="modemproxy", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -312,6 +333,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("imei")
     sp.add_argument("number")
     sp.add_argument("text")
+
+    sp = add("publish-status", cmd_publish_status, "show customer-facing proxy addresses")
+    sp.add_argument("--json", action="store_true")
+    add("publish-sync", cmd_publish_sync, "reconcile firewall / relay tunnel with live proxies")
 
     return p
 

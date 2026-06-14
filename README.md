@@ -133,6 +133,28 @@ curl -H "Authorization: Bearer mk_xxx" http://SERVER_IP:6997/api/pool/random
 curl -u admin:PASS "http://SERVER_IP:6997/api/pool/sticky/user-42?ttl=600"
 ```
 
+## Remote access (selling proxies to customers)
+
+Customers reach the proxies one of two ways, set on **Settings → Remote
+access** (or in `config.yaml`):
+
+- **Direct** — the box has a public/static IP (or a forwarded port). Set
+  `public_host`; customers connect to `public_host:<proxy port>`. The panel can
+  auto-open the ports in `ufw`.
+- **Relay** — the box is behind NAT/CGNAT. A bundled `frpc` opens a reverse
+  tunnel to a relay VPS running `frps`; customers connect to
+  `relay_host:<remote port>`, the home IP stays hidden, no router config. See
+  [`docs/RELAY-VPS.md`](docs/RELAY-VPS.md) to stand up the VPS.
+
+Either way the panel lists the exact `host:port:user:pass` to hand out, and the
+plumbing (firewall rules / tunnel entries) re-syncs automatically whenever you
+add, remove, or stop a proxy.
+
+```bash
+modemproxy publish-status     # customer-facing addresses
+modemproxy publish-sync       # reconcile firewall / relay tunnel
+```
+
 ## OpenVPN per-modem
 
 Each modem can run its own OpenVPN server whose clients egress through that
