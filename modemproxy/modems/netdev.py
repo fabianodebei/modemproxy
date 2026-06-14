@@ -114,7 +114,9 @@ def list_netdevs() -> list[dict[str, Any]]:
             "subnet": str(net),
             "gateway": str(net.network_address + 1),  # x.x.x.1 (ZTE/Huawei default)
             "mac": mac,
-            "id": f"net-{mac or iface}",
+            # iface name is the stable per-dongle id: net-mode sticks often
+            # report a zeroed/duplicate MAC, so MAC is not unique.
+            "id": f"net-{iface}",
             "is_primary": iface in primary,
         })
     return found
@@ -165,7 +167,10 @@ def teardown_routing(bind_ip: str, table: int) -> None:
 def discover() -> list[dict[str, Any]]:
     """Find net-mode dongles, set up routing, and upsert them as modems."""
     results: list[dict[str, Any]] = []
-    devs = [d for d in list_netdevs() if not d["is_primary"]]
+    # net-mode dongles legitimately appear as default-route interfaces (they
+    # ARE the uplink), so don't exclude is_primary — just route each one out
+    # its own interface via a dedicated table.
+    devs = list_netdevs()
     for idx, d in enumerate(devs):
         table = ROUTE_TABLE_BASE + idx
         setup_routing(d["iface"], d["bind_ip"], d["gateway"], table)

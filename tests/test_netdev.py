@@ -37,7 +37,7 @@ def test_list_netdevs_filters_by_driver(monkeypatch):
     d0 = next(d for d in devs if d["iface"] == "enx344b50800000")
     assert d0["bind_ip"] == "192.168.0.203"
     assert d0["gateway"] == "192.168.0.1"
-    assert d0["id"] == "net-344b50800000"
+    assert d0["id"] == "net-enx344b50800000"
     assert d0["is_primary"] is False
 
 
