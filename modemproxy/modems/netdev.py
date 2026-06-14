@@ -176,10 +176,12 @@ def discover() -> list[dict[str, Any]]:
         setup_routing(d["iface"], d["bind_ip"], d["gateway"], table)
         gw = _detect_gateway(d)
         pub = public_ip(d["iface"])
-        status = "online" if pub else "offline"
         vid, pid = _usb_ids(d["iface"])
         model = _model_label(vid, pid, d["driver"])
         info = device_status(gw)  # signal %, operator from the dongle web API
+        # Online if it has a public IP OR the dongle reports signal/operator
+        # (public_ip can transiently time out on a shared subnet).
+        status = "online" if (pub or info.get("signal") or info.get("operator")) else "offline"
         db.upsert_modem(
             d["id"],
             kind="netdev",
