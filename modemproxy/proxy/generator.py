@@ -1,6 +1,7 @@
 """Allocate proxy ports and render per-modem 3proxy configs + systemd units."""
 from __future__ import annotations
 
+import json
 import secrets
 import subprocess
 from pathlib import Path
@@ -51,6 +52,7 @@ def render_modem(imei: str) -> Path:
         raise ValueError(f"modem/port not configured for {imei}")
     dns = " ".join(cfg.dns_servers) if cfg.dns_servers else "1.1.1.1"
     name = modem.get("name") or imei[-6:]
+    white_list = json.loads(port.get("white_list") or "[]")
     text = _env.get_template("3proxy.cfg.j2").render(
         imei=imei,
         name=name,
@@ -61,6 +63,7 @@ def render_modem(imei: str) -> Path:
         socks_port=port["socks_port"],
         modem_ip=modem.get("ip") or "0.0.0.0",
         bind_address=cfg.bind_address,
+        white_list=",".join(white_list) if white_list else "",
     )
     AUTOGEN_DIR.mkdir(parents=True, exist_ok=True)
     out = AUTOGEN_DIR / f"3proxy.{name}.cfg"
@@ -80,6 +83,23 @@ def regenerate_credentials(imei: str) -> dict:
     """Issue a fresh username+password for a modem's proxy."""
     idx = _modem_index(imei)
     db.set_port(imei, username=f"u{idx}", password=secrets.token_hex(8))
+    return apply_port(imei)
+
+
+def set_rotation_interval(imei: str, seconds: int) -> dict:
+    """Set per-port auto-rotation interval (0 = manual). No restart needed."""
+    if not db.get_port(imei):
+        raise ValueError(f"no proxy configured for {imei}")
+    db.set_port(imei, rotation_interval=max(0, int(seconds)))
+    return db.get_port(imei)
+
+
+def set_whitelist(imei: str, ips: list[str]) -> dict:
+    """Restrict a proxy to a list of client IPs/CIDRs ([] = unrestricted)."""
+    if not db.get_port(imei):
+        raise ValueError(f"no proxy configured for {imei}")
+    clean = [s.strip() for s in ips if s and s.strip()]
+    db.set_port(imei, white_list=json.dumps(clean))
     return apply_port(imei)
 
 

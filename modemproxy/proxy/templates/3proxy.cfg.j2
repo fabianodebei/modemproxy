@@ -6,10 +6,17 @@ log /var/log/modemproxy/3proxy.{{ name }}.log D
 logformat "- +_L%t.%. %N.%p %E %U %C:%c %R:%r %O %I %h %T"
 rotate 7
 
-{% if username %}
+{% if username and white_list %}
+users {{ username }}:CL:{{ password }}
+auth strong
+allow {{ username }} {{ white_list }}
+{% elif username %}
 users {{ username }}:CL:{{ password }}
 auth strong
 allow {{ username }}
+{% elif white_list %}
+auth iponly
+allow * {{ white_list }}
 {% else %}
 auth none
 {% endif %}

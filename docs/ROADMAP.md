@@ -10,14 +10,15 @@ Status of feature parity with a full commercial modem-proxy manager.
 - Modern web panel (Tailwind + Alpine + Chart.js) — login, dashboard with
   detail drawer (QR + connection strings + credential edit), bandwidth page
 - Bandwidth accounting — per-interface counter sampler + usage reports + charts
+- Per-port auto-rotation timers — honour `ports.rotation_interval` via
+  `rotate-due` + systemd timer; configurable from the panel
+- Per-proxy client IP whitelist (3proxy ACL), editable from the panel
 - JSON API + CLI
 - SMS list/send via ModemManager
-- systemd units (incl. bandwidth + pinger timers), udev auto-discovery,
+- systemd units (bandwidth + pinger + rotator timers), udev auto-discovery,
   one-command installer
 
 ## Next
-- **Per-port rotation timers** — honour `ports.rotation_interval` via a
-  background scheduler / systemd timer per modem.
 - **USSD** — balance checks (`send_ussd_json`).
 - **Connectivity tests / speedtest** — per-modem `conn_test`, `speedtest`,
   `test_proxy_http`.

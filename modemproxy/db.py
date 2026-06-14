@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS ports (
     password        TEXT,
     rotation_interval INTEGER DEFAULT 0,  -- seconds; 0 = manual
     rotation_url    TEXT,                 -- optional GET hook to trigger rotation
+    white_list      TEXT,                 -- JSON list of allowed client IPs/CIDRs
     enabled         INTEGER DEFAULT 1,
     created_at      INTEGER
 );
@@ -77,6 +78,14 @@ def _connect() -> sqlite3.Connection:
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the first release to existing DBs."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(ports)")}
+    if "white_list" not in cols:
+        conn.execute("ALTER TABLE ports ADD COLUMN white_list TEXT")
 
 
 @contextmanager
@@ -116,7 +125,7 @@ def list_modems() -> list[dict[str, Any]]:
     with db() as conn:
         rows = conn.execute(
             "SELECT m.*, p.http_port, p.socks_port, p.username, p.password, "
-            "p.rotation_interval, p.enabled "
+            "p.rotation_interval, p.white_list, p.enabled "
             "FROM modems m LEFT JOIN ports p ON p.imei = m.imei "
             "ORDER BY m.name"
         ).fetchall()
@@ -175,3 +184,22 @@ def rotation_log(imei: str | None = None, limit: int = 100) -> list[dict[str, An
                 "SELECT * FROM rotation_log ORDER BY ts DESC LIMIT ?", (limit,)
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+def due_for_rotation() -> list[str]:
+    """IMEIs whose rotation_interval elapsed since their last rotation."""
+    t = now()
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT p.imei, p.rotation_interval, "
+            "       (SELECT MAX(ts) FROM rotation_log r WHERE r.imei=p.imei) AS last_ts "
+            "FROM ports p "
+            "JOIN modems m ON m.imei = p.imei "
+            "WHERE p.enabled=1 AND p.rotation_interval > 0 AND m.status='online'"
+        ).fetchall()
+    due = []
+    for r in rows:
+        last = r["last_ts"] or 0
+        if t - last >= r["rotation_interval"]:
+            due.append(r["imei"])
+    return due

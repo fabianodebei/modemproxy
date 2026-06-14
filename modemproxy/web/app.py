@@ -185,6 +185,21 @@ def api_regen(imei: str, _: str = Depends(api_auth)):
     return generator.regenerate_credentials(imei)
 
 
+@app.post("/api/modems/{imei}/rotation-interval")
+async def api_set_interval(imei: str, request: Request, _: str = Depends(api_auth)):
+    body = await request.json()
+    return generator.set_rotation_interval(imei, int((body or {}).get("seconds", 0)))
+
+
+@app.post("/api/modems/{imei}/whitelist")
+async def api_set_whitelist(imei: str, request: Request, _: str = Depends(api_auth)):
+    body = await request.json()
+    ips = (body or {}).get("ips", [])
+    if isinstance(ips, str):
+        ips = [s for s in ips.replace(",", "\n").splitlines()]
+    return generator.set_whitelist(imei, ips)
+
+
 @app.delete("/api/modems/{imei}/port")
 def api_purge(imei: str, _: str = Depends(api_auth)):
     generator.purge_port(imei)

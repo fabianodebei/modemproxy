@@ -1,0 +1,9 @@
+[Unit]
+Description=modemproxy per-port auto-rotation
+After=network.target ModemManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/modemproxy/venv/bin/modemproxy rotate-due
+Environment=MODEMPROXY_CONFIG=/etc/modemproxy/config.yaml
+User=root

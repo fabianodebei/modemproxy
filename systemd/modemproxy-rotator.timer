@@ -1,0 +1,10 @@
+[Unit]
+Description=Check modemproxy auto-rotation every minute
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

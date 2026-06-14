@@ -82,6 +82,22 @@ def cmd_rotate_all(args) -> int:
     return 0
 
 
+def cmd_rotate_due(args) -> int:
+    res = manager.rotate_due(reason="schedule")
+    _print_json(res) if args.json else print(f"rotated {len(res)} modem(s)")
+    return 0
+
+
+def cmd_set_interval(args) -> int:
+    _print_json(generator.set_rotation_interval(args.imei, args.seconds))
+    return 0
+
+
+def cmd_set_whitelist(args) -> int:
+    _print_json(generator.set_whitelist(args.imei, args.ips))
+    return 0
+
+
 def cmd_reset(args) -> int:
     manager.reset_modem(args.imei)
     print(f"reset sent to {args.imei}")
@@ -162,6 +178,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("imei")
 
     add("rotate-all", cmd_rotate_all, "force new IP on all online modems")
+
+    sp = add("rotate-due", cmd_rotate_due, "rotate modems whose interval elapsed")
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("set-interval", cmd_set_interval, "set per-port auto-rotation seconds (0=manual)")
+    sp.add_argument("imei")
+    sp.add_argument("seconds", type=int)
+
+    sp = add("set-whitelist", cmd_set_whitelist, "restrict proxy to client IPs/CIDRs")
+    sp.add_argument("imei")
+    sp.add_argument("ips", nargs="*", help="IPs/CIDRs; omit to clear")
 
     sp = add("reset", cmd_reset, "soft-reset a modem")
     sp.add_argument("imei")

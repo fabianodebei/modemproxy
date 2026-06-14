@@ -167,6 +167,33 @@
                         class="text-xs text-slate-400 hover:text-brand-400">↻ Regenerate username + password</button>
               </div>
 
+              <!-- auto-rotation -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">Auto-rotate IP</p>
+                <div class="flex gap-2">
+                  <select x-model.number="newInterval"
+                          class="flex-1 bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm">
+                    <option value="0">Manual only</option>
+                    <option value="300">Every 5 min</option>
+                    <option value="600">Every 10 min</option>
+                    <option value="1800">Every 30 min</option>
+                    <option value="3600">Every hour</option>
+                  </select>
+                  <button @click="setInterval(selected)" :disabled="busy"
+                          class="px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm">Save</button>
+                </div>
+              </div>
+
+              <!-- IP whitelist -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">Client IP whitelist
+                  <span class="text-slate-600">(one per line, blank = open)</span></p>
+                <textarea x-model="newWl" rows="3" placeholder="203.0.113.4&#10;198.51.100.0/24"
+                          class="w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+                <button @click="setWhitelist(selected)" :disabled="busy"
+                        class="px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm">Save whitelist</button>
+              </div>
+
               <div class="flex gap-2 pt-2">
                 <button @click="rotate(selected)" :disabled="busy" class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Rotate IP</button>
                 <button @click="reset(selected)" :disabled="busy" class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Reset modem</button>
@@ -196,7 +223,7 @@ const SERVER_HOST = {{ (cfg.bind_address if cfg.bind_address != '0.0.0.0' else r
 function dashboard(){
   return {
     modems: {{ modems | tojson }},
-    selected:null, busy:false, toast:'', newPw:'',
+    selected:null, busy:false, toast:'', newPw:'', newInterval:0, newWl:'',
     init(){},
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
     async api(method,url,body){
@@ -212,13 +239,17 @@ function dashboard(){
     async refresh(){ this.modems=await this.api('GET','/api/modems');
       if(this.selected){ this.selected=this.modems.find(m=>m.imei===this.selected.imei)||null; } },
     async discover(){ await this.api('POST','/api/discover'); await this.refresh(); this.notify('Discovery complete'); },
-    open(m){ this.selected=m; this.newPw=''; },
+    open(m){ this.selected=m; this.newPw='';
+      this.newInterval=m.rotation_interval||0;
+      this.newWl=(JSON.parse(m.white_list||'[]')).join('\n'); },
     async rotate(m){ const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
     async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); await this.refresh(); this.notify('Proxy enabled'); },
     async purge(m){ await this.api('DELETE',`/api/modems/${m.imei}/port`); await this.refresh(); this.notify('Proxy disabled'); },
     async reset(m){ await this.api('POST',`/api/modems/${m.imei}/reset`); this.notify('Reset sent'); },
     async setPassword(m){ await this.api('POST',`/api/modems/${m.imei}/password`,{password:this.newPw}); this.newPw=''; await this.refresh(); this.notify('Password updated'); },
     async regenerate(m){ await this.api('POST',`/api/modems/${m.imei}/regenerate`); await this.refresh(); this.notify('Credentials regenerated'); },
+    async setInterval(m){ await this.api('POST',`/api/modems/${m.imei}/rotation-interval`,{seconds:this.newInterval}); await this.refresh(); this.notify(this.newInterval>0?`Auto-rotate every ${this.newInterval}s`:'Auto-rotate off'); },
+    async setWhitelist(m){ const ips=this.newWl.split('\n').map(s=>s.trim()).filter(Boolean); await this.api('POST',`/api/modems/${m.imei}/whitelist`,{ips}); await this.refresh(); this.notify(ips.length?`Whitelist: ${ips.length} IP(s)`:'Whitelist cleared'); },
     connStrings(m){
       const a = m.username?`${m.username}:${m.password}@`:'';
       return [

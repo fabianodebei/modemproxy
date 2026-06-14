@@ -82,6 +82,17 @@ def rotate_all(reason: str = "manual") -> list[dict[str, Any]]:
     return [rotate(m["imei"], reason) for m in db.list_modems() if m.get("status") == "online"]
 
 
+def rotate_due(reason: str = "schedule") -> list[dict[str, Any]]:
+    """Rotate only modems whose per-port rotation interval has elapsed."""
+    out = []
+    for imei in db.due_for_rotation():
+        try:
+            out.append(rotate(imei, reason))
+        except control.MMError:
+            continue
+    return out
+
+
 def reset_modem(imei: str) -> None:
     mid = _mm_id_for(imei)
     if not mid:
