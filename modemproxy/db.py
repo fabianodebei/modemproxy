@@ -43,8 +43,14 @@ CREATE TABLE IF NOT EXISTS ports (
     quota_direction TEXT DEFAULT 'both',  -- in | out | both
     quota_locked    INTEGER DEFAULT 0,    -- 1 = auto-disabled by quota check
     vpn_enabled     INTEGER DEFAULT 0,    -- 1 = per-modem OpenVPN server running
+    expires_at      INTEGER,              -- subscription expiry epoch; NULL = never
     enabled         INTEGER DEFAULT 1,
     created_at      INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS alert_log (
+    akey            TEXT PRIMARY KEY,    -- dedupe key (e.g. "rotfail:<imei>")
+    ts              INTEGER              -- last time this alert was sent
 );
 
 CREATE TABLE IF NOT EXISTS bandwidth (
@@ -117,6 +123,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ports ADD COLUMN quota_locked INTEGER DEFAULT 0")
     if "vpn_enabled" not in cols:
         conn.execute("ALTER TABLE ports ADD COLUMN vpn_enabled INTEGER DEFAULT 0")
+    if "expires_at" not in cols:
+        conn.execute("ALTER TABLE ports ADD COLUMN expires_at INTEGER")
 
     mcols = {r["name"] for r in conn.execute("PRAGMA table_info(modems)")}
     if "kind" not in mcols:
@@ -169,7 +177,8 @@ def list_modems() -> list[dict[str, Any]]:
         rows = conn.execute(
             "SELECT m.*, p.http_port, p.socks_port, p.username, p.password, "
             "p.rotation_interval, p.white_list, p.rotation_token, "
-            "p.quota_bytes, p.quota_direction, p.quota_locked, p.vpn_enabled, p.enabled "
+            "p.quota_bytes, p.quota_direction, p.quota_locked, p.vpn_enabled, "
+            "p.expires_at, p.enabled "
             "FROM modems m LEFT JOIN ports p ON p.imei = m.imei "
             "ORDER BY m.name"
         ).fetchall()
@@ -280,6 +289,21 @@ def get_port_by_token(token: str) -> dict[str, Any] | None:
             "SELECT * FROM ports WHERE rotation_token=?", (token,)
         ).fetchone()
         return dict(r) if r else None
+
+
+def alert_should_send(akey: str, mute_seconds: int) -> bool:
+    """True if this alert key wasn't sent within the mute window; records send."""
+    t = now()
+    with db() as conn:
+        r = conn.execute("SELECT ts FROM alert_log WHERE akey=?", (akey,)).fetchone()
+        if r and mute_seconds > 0 and (t - r["ts"]) < mute_seconds:
+            return False
+        conn.execute(
+            "INSERT INTO alert_log (akey, ts) VALUES (?,?) "
+            "ON CONFLICT(akey) DO UPDATE SET ts=excluded.ts",
+            (akey, t),
+        )
+    return True
 
 
 def log_rotation(imei: str, old_ip: str | None, new_ip: str | None, reason: str) -> None:

@@ -43,6 +43,15 @@ app.add_middleware(SessionMiddleware, secret_key=_cfg.session_secret,
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
 
+def _brand() -> dict:
+    c = get_config()
+    return {"name": c.brand_name or "modemproxy", "company": c.company_name,
+            "url": c.company_url, "creds_style": c.creds_style}
+
+
+templates.env.globals["brand"] = _brand
+
+
 def _humanbytes(n) -> str:
     try:
         n = float(n or 0)
@@ -201,10 +210,19 @@ def settings_page(request: Request, user: str = Depends(ui_auth)):
         "relay_token": cfg.relay_token,
         "relay_remote_offset": cfg.relay_remote_offset,
     }
+    branding = {"brand_name": cfg.brand_name, "company_name": cfg.company_name,
+                "company_url": cfg.company_url, "creds_style": cfg.creds_style}
+    alerting = {"tg_alerts_enable": cfg.tg_alerts_enable, "tg_bot_token": cfg.tg_bot_token,
+                "tg_chat_id": cfg.tg_chat_id, "alert_rotation_ok": cfg.alert_rotation_ok,
+                "alert_rotation_fail": cfg.alert_rotation_fail,
+                "alert_proxy_down": cfg.alert_proxy_down, "alert_expiry": cfg.alert_expiry,
+                "alert_expiry_days": cfg.alert_expiry_days,
+                "alert_mute_minutes": cfg.alert_mute_minutes}
     return templates.TemplateResponse(
         request, "settings.html",
         {"user": user, "keys": db.api_key_list(),
-         "access": access, "publish": publish.status()},
+         "access": access, "publish": publish.status(),
+         "branding": branding, "alerting": alerting},
     )
 
 
@@ -354,11 +372,14 @@ def api_vpn_export(imei: str, _: str = Depends(api_auth)):
 # --- allocation pool -------------------------------------------------------
 
 def _live_proxies(request: Request) -> list[dict]:
+    import time as _time
     host = request.url.hostname
+    now = int(_time.time())
     out = []
     for m in db.list_modems():
+        expired = m.get("expires_at") and m["expires_at"] <= now
         if (m.get("status") == "online" and m.get("http_port")
-                and m.get("enabled") and not m.get("quota_locked")):
+                and m.get("enabled") and not m.get("quota_locked") and not expired):
             cred = f"{m['username']}:{m['password']}@" if m.get("username") else ""
             out.append({
                 "imei": m["imei"], "name": m.get("name"),
@@ -468,6 +489,36 @@ async def api_access_update(request: Request, _: str = Depends(admin_auth)):
     update_config(updates)
     result = publish.sync()
     return {"ok": True, "sync": result, "status": publish.status()}
+
+
+@app.post("/api/settings")
+async def api_settings_update(request: Request, _: str = Depends(admin_auth)):
+    """Update branding + Telegram alert settings."""
+    from ..config import update_config
+    body = await request.json() if await request.body() else {}
+    allowed = {"brand_name", "company_name", "company_url", "creds_style",
+               "tg_alerts_enable", "tg_bot_token", "tg_chat_id",
+               "alert_rotation_ok", "alert_rotation_fail", "alert_proxy_down",
+               "alert_expiry", "alert_expiry_days", "alert_mute_minutes"}
+    updates = {k: v for k, v in (body or {}).items() if k in allowed}
+    update_config(updates)
+    return {"ok": True}
+
+
+@app.post("/api/alert-test")
+def api_alert_test(_: str = Depends(admin_auth)):
+    from ..services import alerts
+    return {"sent": alerts.notify("test alert — modemproxy is wired up ✅")}
+
+
+@app.post("/api/modems/{imei}/expiry")
+async def api_set_expiry(imei: str, request: Request, _: str = Depends(api_auth)):
+    from ..services import subscriptions
+    body = await request.json() if await request.body() else {}
+    days = (body or {}).get("days")
+    if days in (None, "", 0):
+        return subscriptions.set_expiry(imei, None)
+    return subscriptions.extend(imei, int(days))
 
 
 @app.get("/metrics", response_class=PlainTextResponse)

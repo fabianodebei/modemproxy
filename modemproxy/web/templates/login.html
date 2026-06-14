@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Sign in · modemproxy{% endblock %}
+{% block title %}Sign in · {{ brand().name }}{% endblock %}
 {% block body %}
 <div class="min-h-screen grid place-items-center px-4">
   <div class="w-full max-w-sm">
@@ -12,7 +12,7 @@
           <circle cx="7" cy="17" r="1.4" fill="currentColor"/>
         </svg>
       </div>
-      <h1 class="text-xl font-semibold tracking-tight">modemproxy</h1>
+      <h1 class="text-xl font-semibold tracking-tight">{{ brand().name }}</h1>
     </div>
 
     <form method="post" action="/login"
@@ -38,7 +38,7 @@
       <button class="w-full bg-brand-500 hover:bg-brand-600 transition text-white
                      font-medium rounded-lg px-3 py-2 text-sm">Sign in</button>
     </form>
-    <p class="text-center text-xs text-slate-600 mt-4">modemproxy · self-hosted proxy pool</p>
+    <p class="text-center text-xs text-slate-600 mt-4">{{ brand().company or brand().name }}</p>
   </div>
 </div>
 {% endblock %}

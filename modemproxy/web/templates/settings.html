@@ -72,6 +72,72 @@
   </div>
 </div>
 
+<div x-data="branding()" class="max-w-2xl mb-6">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <h2 class="text-sm font-medium text-slate-200 mb-4">Branding</h2>
+    <div class="space-y-3">
+      <label class="block text-xs text-slate-400">Product name
+        <input x-model="brand_name" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+      </label>
+      <div class="flex gap-2">
+        <label class="block text-xs text-slate-400 flex-1">Company name
+          <input x-model="company_name" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+        <label class="block text-xs text-slate-400 flex-1">Company URL
+          <input x-model="company_url" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+      </div>
+      <label class="block text-xs text-slate-400">Credentials style
+        <select x-model="creds_style" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+          <option value="default">host:port:user:pass</option>
+          <option value="curl">http://user:pass@host:port</option>
+        </select>
+      </label>
+    </div>
+    <div class="mt-4 flex items-center gap-3">
+      <button @click="save()" :disabled="busy" class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-4 py-1.5 text-sm">Save</button>
+      <span x-show="saved" x-cloak class="text-xs text-emerald-300">Saved ✓ (reload to see)</span>
+    </div>
+  </div>
+</div>
+
+<div x-data="alerting()" class="max-w-2xl mb-6">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <h2 class="text-sm font-medium text-slate-200 mb-1">Telegram alerts</h2>
+    <p class="text-xs text-slate-500 mb-4">Bot token from <code>@BotFather</code>; chat id from <code>@userinfobot</code>.</p>
+    <label class="flex items-center gap-2 text-xs text-slate-300 mb-3">
+      <input type="checkbox" x-model="tg_alerts_enable"> enable alerts
+    </label>
+    <div class="space-y-3">
+      <label class="block text-xs text-slate-400">Bot token
+        <input x-model="tg_bot_token" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm font-mono">
+      </label>
+      <label class="block text-xs text-slate-400">Chat ID
+        <input x-model="tg_chat_id" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm font-mono">
+      </label>
+      <div class="grid grid-cols-2 gap-2 text-xs text-slate-300">
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="alert_rotation_ok"> rotation OK</label>
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="alert_rotation_fail"> rotation fail</label>
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="alert_proxy_down"> proxy down</label>
+        <label class="flex items-center gap-2"><input type="checkbox" x-model="alert_expiry"> expiry</label>
+      </div>
+      <div class="flex gap-2">
+        <label class="block text-xs text-slate-400 w-32">Expiry warn (days)
+          <input type="number" x-model.number="alert_expiry_days" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+        <label class="block text-xs text-slate-400 w-32">Mute (min)
+          <input type="number" x-model.number="alert_mute_minutes" class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+      </div>
+    </div>
+    <div class="mt-4 flex items-center gap-3">
+      <button @click="save()" :disabled="busy" class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-4 py-1.5 text-sm">Save</button>
+      <button @click="test()" class="bg-ink-700 hover:bg-ink-600 text-slate-200 rounded-lg px-3 py-1.5 text-sm">Send test</button>
+      <span x-show="msg" x-cloak class="text-xs text-emerald-300" x-text="msg"></span>
+    </div>
+  </div>
+</div>
+
 <div x-data="keys()" x-init="init()" class="max-w-2xl">
   <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
     <div class="flex items-center justify-between mb-4">
@@ -125,6 +191,43 @@
 </div>
 
 <script>
+function branding(){
+  const b = {{ branding | tojson }};
+  return {
+    brand_name:b.brand_name||'', company_name:b.company_name||'',
+    company_url:b.company_url||'', creds_style:b.creds_style||'default',
+    busy:false, saved:false, _t:null,
+    async save(){ this.busy=true; this.saved=false;
+      try{ await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({brand_name:this.brand_name,company_name:this.company_name,
+          company_url:this.company_url,creds_style:this.creds_style})});
+        this.saved=true; clearTimeout(this._t); this._t=setTimeout(()=>this.saved=false,3000);
+      } finally { this.busy=false; } },
+  }
+}
+function alerting(){
+  const a = {{ alerting | tojson }};
+  return {
+    tg_alerts_enable:a.tg_alerts_enable, tg_bot_token:a.tg_bot_token||'',
+    tg_chat_id:a.tg_chat_id||'', alert_rotation_ok:a.alert_rotation_ok,
+    alert_rotation_fail:a.alert_rotation_fail, alert_proxy_down:a.alert_proxy_down,
+    alert_expiry:a.alert_expiry, alert_expiry_days:a.alert_expiry_days||7,
+    alert_mute_minutes:a.alert_mute_minutes||3, busy:false, msg:'', _t:null,
+    payload(){ return {tg_alerts_enable:this.tg_alerts_enable,tg_bot_token:this.tg_bot_token,
+      tg_chat_id:this.tg_chat_id,alert_rotation_ok:this.alert_rotation_ok,
+      alert_rotation_fail:this.alert_rotation_fail,alert_proxy_down:this.alert_proxy_down,
+      alert_expiry:this.alert_expiry,alert_expiry_days:this.alert_expiry_days,
+      alert_mute_minutes:this.alert_mute_minutes}; },
+    flash(t){ this.msg=t; clearTimeout(this._t); this._t=setTimeout(()=>this.msg='',3000); },
+    async save(){ this.busy=true;
+      try{ await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(this.payload())}); this.flash('Saved ✓'); }
+      finally{ this.busy=false; } },
+    async test(){ await this.save();
+      const r=await (await fetch('/api/alert-test',{method:'POST'})).json();
+      this.flash(r.sent?'Test sent ✓':'Not sent — check token/chat id'); },
+  }
+}
 function access(){
   const a = {{ access | tojson }};
   const pub = {{ publish | tojson }};

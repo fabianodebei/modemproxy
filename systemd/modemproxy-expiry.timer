@@ -1,0 +1,9 @@
+[Unit]
+Description=modemproxy daily subscription expiry check
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

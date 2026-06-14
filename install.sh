@@ -166,6 +166,18 @@ relay_host: ""
 relay_port: 7000
 relay_token: ""
 relay_remote_offset: 0
+
+# --- White-label branding ----------------------------------------------
+brand_name: modemproxy
+company_name: ""
+company_url: ""
+creds_style: default
+
+# --- Telegram alerts ---------------------------------------------------
+tg_alerts_enable: false
+tg_bot_token: ""
+tg_chat_id: ""
+alert_expiry_days: 7
 EOF
     GENERATED_PW="$PW"
 fi
@@ -183,6 +195,7 @@ systemctl enable --now modemproxy-pinger.timer
 systemctl enable --now modemproxy-bandwidth.timer
 systemctl enable --now modemproxy-rotator.timer
 systemctl enable --now modemproxy-quota.timer
+systemctl enable --now modemproxy-expiry.timer
 
 log "Initial modem discovery"
 "$VENV/bin/modemproxy" init-db

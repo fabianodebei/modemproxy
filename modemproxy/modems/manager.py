@@ -7,6 +7,7 @@ from typing import Any
 
 from .. import db
 from ..config import get_config
+from ..services import alerts
 from . import control, netdev
 
 
@@ -54,6 +55,14 @@ def discover() -> list[dict[str, Any]]:
         results.extend(netdev.discover())
     except Exception:  # discovery of net dongles must never break mm discovery
         pass
+
+    # Alert on proxies that should be up but went offline.
+    try:
+        for m in db.list_modems():
+            if m.get("enabled") and m.get("http_port") and m.get("status") == "offline":
+                alerts.proxy_down(m["imei"], m.get("name") or m["imei"][-6:])
+    except Exception:
+        pass
     return results
 
 
@@ -79,21 +88,23 @@ def rotate(imei: str, reason: str = "manual") -> dict[str, Any]:
     """Force a new public IP for one modem by reconnecting its data link."""
     old = db.get_modem(imei)
     old_ip = old.get("ip") if old else None
-
-    if old and old.get("kind") == "netdev":
-        new_ip = netdev.rotate(old)
-        db.upsert_modem(imei, ip=new_ip, last_seen=db.now())
-        db.log_rotation(imei, old_ip, new_ip, reason)
-        return {"imei": imei, "old_ip": old_ip, "new_ip": new_ip}
-
-    mid = _mm_id_for(imei)
-    if not mid:
-        raise control.MMError(f"modem {imei} not present")
-    control.reconnect(mid)
-    time.sleep(3)
-    new_ip = control_safe_ip(mid)
+    name = (old or {}).get("name") or imei[-6:]
+    try:
+        if old and old.get("kind") == "netdev":
+            new_ip = netdev.rotate(old)
+        else:
+            mid = _mm_id_for(imei)
+            if not mid:
+                raise control.MMError(f"modem {imei} not present")
+            control.reconnect(mid)
+            time.sleep(3)
+            new_ip = control_safe_ip(mid)
+    except Exception as e:
+        alerts.rotation_fail(imei, name, str(e))
+        raise
     db.upsert_modem(imei, ip=new_ip, last_seen=db.now())
     db.log_rotation(imei, old_ip, new_ip, reason)
+    alerts.rotation_ok(imei, name, old_ip, new_ip)
     return {"imei": imei, "old_ip": old_ip, "new_ip": new_ip}
 
 

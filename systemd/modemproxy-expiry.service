@@ -1,0 +1,9 @@
+[Unit]
+Description=modemproxy subscription expiry check (disable expired, warn expiring)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/modemproxy/venv/bin/modemproxy expiry-check
+Environment=MODEMPROXY_CONFIG=/etc/modemproxy/config.yaml
+User=root

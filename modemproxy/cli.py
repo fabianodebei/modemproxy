@@ -12,7 +12,7 @@ import sys
 from . import db
 from .modems import control, manager
 from .proxy import generator
-from .services import bandwidth, openvpn, publish, quota, tests
+from .services import alerts, bandwidth, openvpn, publish, quota, subscriptions, tests
 
 
 def _print_json(obj) -> None:
@@ -210,6 +210,29 @@ def cmd_set_quota(args) -> int:
     return 0
 
 
+def cmd_set_expiry(args) -> int:
+    if args.days is not None:
+        _print_json(subscriptions.extend(args.imei, args.days))
+    elif args.clear:
+        _print_json(subscriptions.set_expiry(args.imei, None))
+    else:
+        print("specify --days N or --clear", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_expiry_check(args) -> int:
+    actions = subscriptions.check()
+    _print_json(actions) if args.json else print(f"{len(actions)} change(s)")
+    return 0
+
+
+def cmd_alert_test(args) -> int:
+    ok = alerts.notify("test alert — modemproxy is wired up ✅")
+    print("sent" if ok else "not sent (check tg_alerts_enable / token / chat_id)")
+    return 0 if ok else 1
+
+
 def cmd_add_netdev(args) -> int:
     from .modems import netdev
     info = netdev.register_manual(
@@ -342,6 +365,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("imei")
     sp.add_argument("number")
     sp.add_argument("text")
+
+    sp = add("set-expiry", cmd_set_expiry, "set/extend a proxy subscription expiry")
+    sp.add_argument("imei")
+    sp.add_argument("--days", type=int, help="extend by N days from now/current expiry")
+    sp.add_argument("--clear", action="store_true", help="remove expiry (never expires)")
+
+    sp = add("expiry-check", cmd_expiry_check, "disable expired proxies + warn on expiring")
+    sp.add_argument("--json", action="store_true")
+
+    add("alert-test", cmd_alert_test, "send a test Telegram alert")
 
     sp = add("add-netdev", cmd_add_netdev, "register a LAN 4G/5G router (cabled ethernet) as a modem")
     sp.add_argument("iface", help="network interface the router is cabled to, e.g. eth1")

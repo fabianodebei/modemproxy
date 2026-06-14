@@ -59,6 +59,23 @@ class Config:
     relay_remote_offset: int = 0          # remote_port = local_port + offset
                                           # (lets several boxes share one relay)
 
+    # White-label branding (shown in the panel / login / page titles)
+    brand_name: str = "modemproxy"
+    company_name: str = ""
+    company_url: str = ""
+    creds_style: str = "default"          # default (host:port:user:pass) | curl
+
+    # Telegram alerts
+    tg_alerts_enable: bool = False
+    tg_bot_token: str = ""
+    tg_chat_id: str = ""                   # numeric user id or -group id
+    alert_rotation_ok: bool = False
+    alert_rotation_fail: bool = True
+    alert_proxy_down: bool = True
+    alert_expiry: bool = True
+    alert_expiry_days: int = 7             # warn this many days before a port expires
+    alert_mute_minutes: int = 3           # skip identical alerts within this window
+
     # Database
     db_path: str = str(STATE_DIR / "modemproxy.db")
 
