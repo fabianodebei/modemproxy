@@ -164,41 +164,110 @@ def teardown_routing(bind_ip: str, table: int) -> None:
 
 # --- discovery -------------------------------------------------------------
 
+def _refresh_dev(dev: dict[str, Any], table: int, *, manual: bool = False,
+                 mgmt_host: str | None = None, model: str | None = None) -> dict[str, Any]:
+    """Set up routing, read status, and upsert one net-mode device."""
+    setup_routing(dev["iface"], dev["bind_ip"], dev["gateway"], table)
+    gw = mgmt_host or _detect_gateway(dev)
+    pub = public_ip(dev["iface"])
+    if model is None:
+        vid, pid = _usb_ids(dev["iface"])
+        model = _model_label(vid, pid, dev.get("driver"))
+    info = device_status(gw)  # signal %, operator from the device web API
+    # Online if it has a public IP OR the device reports signal/operator
+    # (public_ip can transiently time out on a shared subnet).
+    status = "online" if (pub or info.get("signal") or info.get("operator")) else "offline"
+    db.upsert_modem(
+        dev["id"],
+        kind="netdev",
+        iface=dev["iface"],
+        bind_ip=dev["bind_ip"],
+        mgmt_host=gw,
+        rt_table=table,
+        model=model,
+        ip=pub,
+        signal=info.get("signal"),
+        operator=info.get("operator"),
+        status=status,
+        manual=1 if manual else 0,
+        last_seen=db.now(),
+    )
+    return {**dev, "mgmt_host": gw, "public_ip": pub, "status": status,
+            "model": model, "imei": dev["id"], **info}
+
+
 def discover() -> list[dict[str, Any]]:
-    """Find net-mode dongles, set up routing, and upsert them as modems."""
+    """Find net-mode dongles + refresh manual LAN routers; upsert as modems."""
     results: list[dict[str, Any]] = []
-    # net-mode dongles legitimately appear as default-route interfaces (they
-    # ARE the uplink), so don't exclude is_primary — just route each one out
-    # its own interface via a dedicated table.
-    devs = list_netdevs()
-    for idx, d in enumerate(devs):
-        table = ROUTE_TABLE_BASE + idx
-        setup_routing(d["iface"], d["bind_ip"], d["gateway"], table)
-        gw = _detect_gateway(d)
-        pub = public_ip(d["iface"])
-        vid, pid = _usb_ids(d["iface"])
-        model = _model_label(vid, pid, d["driver"])
-        info = device_status(gw)  # signal %, operator from the dongle web API
-        # Online if it has a public IP OR the dongle reports signal/operator
-        # (public_ip can transiently time out on a shared subnet).
-        status = "online" if (pub or info.get("signal") or info.get("operator")) else "offline"
-        db.upsert_modem(
-            d["id"],
-            kind="netdev",
-            iface=d["iface"],
-            bind_ip=d["bind_ip"],
-            mgmt_host=gw,
-            rt_table=table,
-            model=model,
-            ip=pub,
-            signal=info.get("signal"),
-            operator=info.get("operator"),
-            status=status,
-            last_seen=db.now(),
-        )
-        results.append({**d, "mgmt_host": gw, "public_ip": pub, "status": status,
-                        "model": model, "imei": d["id"], **info})
+    auto_ifaces = set()
+    # Auto-detected USB net-mode dongles. They legitimately appear as
+    # default-route interfaces (they ARE the uplink), so don't exclude
+    # is_primary — just route each one out its own table.
+    for idx, d in enumerate(list_netdevs()):
+        results.append(_refresh_dev(d, ROUTE_TABLE_BASE + idx))
+        auto_ifaces.add(d["iface"])
+
+    # Manually added LAN 4G/5G routers (ethernet NICs the driver filter skips).
+    for m in db.list_modems():
+        if m.get("kind") != "netdev" or not m.get("manual") or m.get("iface") in auto_ifaces:
+            continue
+        iface = m["iface"]
+        ipv4 = _iface_ipv4(iface)
+        if not ipv4:
+            db.upsert_modem(m["imei"], status="offline", last_seen=db.now())
+            continue
+        gw = m.get("mgmt_host") or _gateway_of(ipv4)
+        dev = {"iface": iface, "bind_ip": ipv4, "gateway": gw,
+               "id": m["imei"], "driver": None}
+        table = m.get("rt_table") or _next_table()
+        results.append(_refresh_dev(dev, table, manual=True, mgmt_host=gw,
+                                    model=m.get("model")))
     return results
+
+
+def _gateway_of(ipv4: str) -> str:
+    return str(ipaddress.ip_network(f"{ipv4}/24", strict=False).network_address + 1)
+
+
+def _iface_ipv4(iface: str) -> str | None:
+    for entry in _addrs():
+        if entry.get("ifname") != iface:
+            continue
+        for a in entry.get("addr_info", []):
+            if a.get("family") == "inet" and not a.get("local", "").startswith("169.254"):
+                return a["local"]
+    return None
+
+
+def _next_table() -> int:
+    used = {m.get("rt_table") for m in db.list_modems() if m.get("rt_table")}
+    t = ROUTE_TABLE_BASE
+    while t in used:
+        t += 1
+    return t
+
+
+def register_manual(iface: str, *, gateway: str | None = None,
+                    mgmt_host: str | None = None, name: str | None = None,
+                    model: str | None = None) -> dict[str, Any]:
+    """Register a LAN 4G/5G router (cabled ethernet) as a net-mode modem.
+
+    Unlike auto-discovery, this works for real NIC drivers (the router is on
+    the other end of an ethernet cable, not a USB stick).
+    """
+    ipv4 = _iface_ipv4(iface)
+    if not ipv4:
+        raise NetdevError(f"interface {iface} has no IPv4 address")
+    gw = gateway or mgmt_host or _gateway_of(ipv4)
+    dev = {"iface": iface, "bind_ip": ipv4, "gateway": gw,
+           "id": f"net-{iface}", "driver": None}
+    table = _next_table()
+    out = _refresh_dev(dev, table, manual=True, mgmt_host=mgmt_host or gw,
+                       model=model or "LAN router (net-mode)")
+    if name:
+        db.upsert_modem(out["imei"], name=name)
+        out["name"] = name
+    return out
 
 
 def device_status(host: str) -> dict[str, Any]:

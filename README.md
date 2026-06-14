@@ -80,6 +80,22 @@ USB modems ──► ModemManager (libqmi / libmbim / AT)
 - **Panel + API** — modern dashboard (Tailwind + Alpine, no Node build) and a
   JSON API under `/api`.
 
+## LAN 4G/5G routers (cabled ethernet)
+
+USB sticks are auto-discovered. A standalone 4G/5G router wired to the box over
+ethernet (e.g. ZTE MC801A) is a real NIC, not a USB modem, so register it
+manually — it then behaves like any other net-mode modem (per-router policy
+routing, 3proxy egress bound to its interface, IP rotation via the router web
+API):
+
+```bash
+modemproxy add-netdev eth1 --name cpe1 --model "ZTE MC801A"
+# optional: --gateway 192.168.0.1 --mgmt-host 192.168.0.1
+modemproxy apply-port net-eth1
+```
+
+`discover` keeps refreshing manually-added routers (IP, signal, routing).
+
 ## CLI
 
 ```bash

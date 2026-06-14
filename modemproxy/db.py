@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS modems (
     bind_ip         TEXT,                -- local source IP for 3proxy egress binding
     mgmt_host       TEXT,                -- net-mode dongle web API host (e.g. 192.168.0.1)
     rt_table        INTEGER,             -- policy-routing table id (net-mode dongles)
+    manual          INTEGER DEFAULT 0,   -- 1 = manually added (LAN 4G/5G router via ethernet)
     model           TEXT,
     operator        TEXT,
     ip              TEXT,                -- current public WAN IP
@@ -126,6 +127,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE modems ADD COLUMN mgmt_host TEXT")
     if "rt_table" not in mcols:
         conn.execute("ALTER TABLE modems ADD COLUMN rt_table INTEGER")
+    if "manual" not in mcols:
+        conn.execute("ALTER TABLE modems ADD COLUMN manual INTEGER DEFAULT 0")
 
 
 @contextmanager

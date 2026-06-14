@@ -210,6 +210,15 @@ def cmd_set_quota(args) -> int:
     return 0
 
 
+def cmd_add_netdev(args) -> int:
+    from .modems import netdev
+    info = netdev.register_manual(
+        args.iface, gateway=args.gateway, mgmt_host=args.mgmt_host,
+        name=args.name, model=args.model)
+    _print_json(info)
+    return 0
+
+
 def cmd_publish_status(args) -> int:
     st = publish.status()
     if args.json:
@@ -333,6 +342,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("imei")
     sp.add_argument("number")
     sp.add_argument("text")
+
+    sp = add("add-netdev", cmd_add_netdev, "register a LAN 4G/5G router (cabled ethernet) as a modem")
+    sp.add_argument("iface", help="network interface the router is cabled to, e.g. eth1")
+    sp.add_argument("--gateway", help="router gateway IP (default: x.x.x.1 of the iface subnet)")
+    sp.add_argument("--mgmt-host", dest="mgmt_host", help="router web API host (default: gateway)")
+    sp.add_argument("--name", help="friendly nick")
+    sp.add_argument("--model", help="model label, e.g. 'ZTE MC801A'")
 
     sp = add("publish-status", cmd_publish_status, "show customer-facing proxy addresses")
     sp.add_argument("--json", action="store_true")

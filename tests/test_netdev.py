@@ -98,6 +98,48 @@ def test_status_zte_parses_signal_and_operator(monkeypatch):
     assert info["operator"] == "WINDTRE"
 
 
+def test_register_manual_lan_router(monkeypatch):
+    monkeypatch.setattr(netdev, "_iface_ipv4", lambda i: "192.168.0.50")
+    monkeypatch.setattr(netdev, "setup_routing", lambda *a, **k: None)
+    monkeypatch.setattr(netdev, "public_ip", lambda i: "88.1.2.3")
+    monkeypatch.setattr(netdev, "device_status", lambda h: {"signal": 80, "operator": "WINDTRE"})
+
+    info = netdev.register_manual("eth1", name="cpe1", model="ZTE MC801A")
+    assert info["imei"] == "net-eth1"
+    m = db.get_modem("net-eth1")
+    assert m["kind"] == "netdev"
+    assert m["manual"] == 1
+    assert m["bind_ip"] == "192.168.0.50"
+    assert m["mgmt_host"] == "192.168.0.1"   # derived gateway
+    assert m["name"] == "cpe1"
+    assert m["model"] == "ZTE MC801A"
+    assert m["signal"] == 80
+
+
+def test_register_manual_requires_ip(monkeypatch):
+    monkeypatch.setattr(netdev, "_iface_ipv4", lambda i: None)
+    with pytest.raises(netdev.NetdevError):
+        netdev.register_manual("eth9")
+
+
+def test_discover_refreshes_manual_router(monkeypatch):
+    # a manual router already in the DB, no auto USB dongles present
+    db.upsert_modem("net-eth1", kind="netdev", manual=1, iface="eth1",
+                    mgmt_host="192.168.0.1", rt_table=150, model="ZTE MC801A")
+    monkeypatch.setattr(netdev, "list_netdevs", lambda: [])
+    monkeypatch.setattr(netdev, "_iface_ipv4", lambda i: "192.168.0.50")
+    monkeypatch.setattr(netdev, "setup_routing", lambda *a, **k: None)
+    monkeypatch.setattr(netdev, "public_ip", lambda i: "88.1.2.3")
+    monkeypatch.setattr(netdev, "device_status", lambda h: {"signal": 60})
+
+    out = netdev.discover()
+    assert any(r["imei"] == "net-eth1" for r in out)
+    m = db.get_modem("net-eth1")
+    assert m["ip"] == "88.1.2.3"
+    assert m["status"] == "online"
+    assert m["signal"] == 60
+
+
 def test_rotate_netdev_uses_web_api(monkeypatch):
     imei = "net-aabbccddeeff"
     db.upsert_modem(imei, kind="netdev", iface="enx0",
