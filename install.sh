@@ -2,8 +2,10 @@
 #
 # modemproxy one-command installer for Ubuntu.
 #
-# Private repo — pass a GitHub token (a fine-grained PAT with read access to
-# the repo, or a classic PAT with `repo` scope):
+#   curl -fsSL https://raw.githubusercontent.com/fabianodebei/modemproxy/main/install.sh | sudo bash
+#
+# Private fork? Pass a GitHub token (fine-grained PAT with repo read, or classic
+# PAT with `repo` scope):
 #
 #   curl -fsSL -H "Authorization: token GHP_xxx" \
 #     https://raw.githubusercontent.com/fabianodebei/modemproxy/main/install.sh \
