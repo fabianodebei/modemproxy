@@ -86,6 +86,18 @@ def test_generator_binds_netdev_to_local_ip():
     assert "5.6.7.8" not in cfg_text           # never bind to the public IP
 
 
+def test_status_zte_parses_signal_and_operator(monkeypatch):
+    class FakeResp:
+        status_code = 200
+        def json(self):
+            return {"signalbar": "2", "network_provider": "WINDTRE",
+                    "network_type": "LTE", "rssi": "", "rscp": ""}
+    monkeypatch.setattr(netdev.httpx, "get", lambda *a, **k: FakeResp())
+    info = netdev._status_zte("192.168.0.1")
+    assert info["signal"] == 40       # 2 of 5 bars -> 40%
+    assert info["operator"] == "WINDTRE"
+
+
 def test_rotate_netdev_uses_web_api(monkeypatch):
     imei = "net-aabbccddeeff"
     db.upsert_modem(imei, kind="netdev", iface="enx0",

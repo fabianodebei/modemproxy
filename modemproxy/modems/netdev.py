@@ -179,6 +179,7 @@ def discover() -> list[dict[str, Any]]:
         status = "online" if pub else "offline"
         vid, pid = _usb_ids(d["iface"])
         model = _model_label(vid, pid, d["driver"])
+        info = device_status(gw)  # signal %, operator from the dongle web API
         db.upsert_modem(
             d["id"],
             kind="netdev",
@@ -188,12 +189,72 @@ def discover() -> list[dict[str, Any]]:
             rt_table=table,
             model=model,
             ip=pub,
+            signal=info.get("signal"),
+            operator=info.get("operator"),
             status=status,
             last_seen=db.now(),
         )
         results.append({**d, "mgmt_host": gw, "public_ip": pub, "status": status,
-                        "model": model, "imei": d["id"]})
+                        "model": model, "imei": d["id"], **info})
     return results
+
+
+def device_status(host: str) -> dict[str, Any]:
+    """Signal quality (%) and operator name from the dongle web API."""
+    return _status_zte(host) or _status_huawei(host) or {}
+
+
+def _status_zte(host: str) -> dict[str, Any] | None:
+    """ZTE goform: signalbar (0-5), network_provider, network_type."""
+    url = (f"http://{host}/goform/goform_get_cmd_process"
+           "?isTest=false&multi_data=1"
+           "&cmd=signalbar,network_provider,network_type,rssi,rscp")
+    headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    try:
+        r = httpx.get(url, headers=headers, timeout=5.0)
+        if r.status_code >= 400:
+            return None
+        d = r.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    if "signalbar" not in d and "network_provider" not in d:
+        return None
+    out: dict[str, Any] = {}
+    bars = d.get("signalbar")
+    if bars not in (None, ""):
+        try:
+            out["signal"] = int(round(int(bars) / 5 * 100))
+        except (TypeError, ValueError):
+            pass
+    op = d.get("network_provider")
+    if op:
+        out["operator"] = op
+    return out or None
+
+
+def _status_huawei(host: str) -> dict[str, Any] | None:
+    """Huawei HiLink: /api/device/signal + /api/net/current-plmn."""
+    try:
+        sig = httpx.get(f"http://{host}/api/device/signal", timeout=5.0)
+        if sig.status_code >= 400 or "<rsrp>" not in sig.text and "<rssi>" not in sig.text:
+            return None
+    except httpx.HTTPError:
+        return None
+    out: dict[str, Any] = {}
+    # rsrp dBm -> rough %: -140 (0%) .. -44 (100%)
+    if "<rsrp>" in sig.text:
+        try:
+            rsrp = int(sig.text.split("<rsrp>")[1].split("dBm")[0].strip())
+            out["signal"] = max(0, min(100, round((rsrp + 140) / 96 * 100)))
+        except (ValueError, IndexError):
+            pass
+    try:
+        plmn = httpx.get(f"http://{host}/api/net/current-plmn", timeout=5.0)
+        if "<FullName>" in plmn.text:
+            out["operator"] = plmn.text.split("<FullName>")[1].split("</FullName>")[0]
+    except httpx.HTTPError:
+        pass
+    return out or None
 
 
 def _detect_gateway(dev: dict[str, Any]) -> str:
