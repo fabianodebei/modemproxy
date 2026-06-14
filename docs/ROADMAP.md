@@ -24,11 +24,14 @@ Status of feature parity with a full commercial modem-proxy manager.
   configurable per modem from the panel
 - Allocation pool API — `/api/pool` + `/api/pool/random` hand out live proxies
   (excludes offline / disabled / quota-locked), optional operator filter
+- Sticky sessions — `/api/pool/sticky/{key}` pins a key to one live modem for a
+  TTL window
+- Prometheus `/metrics` — pool health + per-modem signal, online, month traffic
 
 ## Next
-- **Sticky sessions** — keep a client on the same modem for a session window.
-- **OpenVPN per-modem export** — download a client config per modem.
-- **Prometheus metrics** — `/metrics` for signal, traffic, online count.
+- **OpenVPN per-modem export** — download a client config per modem (needs a
+  per-modem OpenVPN server on the box).
+- **Web: rotation log + pool views** — surface history and the pool in the UI.
 
 ## Later
 - OS/TCP fingerprint spoofing layer (p0f / osfooler)

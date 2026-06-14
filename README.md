@@ -111,6 +111,18 @@ curl -u admin:PASS "http://SERVER_IP:6997/api/pool/random?operator=TIM"
 
 Each entry includes ready-to-use `http` and `socks5` connection strings.
 
+**Sticky sessions** — keep one caller on the same modem for a TTL window:
+
+```bash
+curl -u admin:PASS "http://SERVER_IP:6997/api/pool/sticky/user-42?ttl=600"
+```
+
+## Monitoring
+
+Prometheus metrics (no auth) at `/metrics`: `modemproxy_modems_total`,
+`_modems_online`, `_proxies_active`, `_quota_locked`, plus per-modem
+`_modem_signal`, `_modem_online`, and `_modem_month_bytes{direction=...}`.
+
 ## Configuration
 
 All keys in [`docs/CONFIG.md`](docs/CONFIG.md). Edit

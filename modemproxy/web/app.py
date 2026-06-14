@@ -11,7 +11,9 @@ import secrets
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -22,7 +24,7 @@ import random
 
 from ..modems import control, manager
 from ..proxy import generator
-from ..services import bandwidth, quota, tests
+from ..services import bandwidth, metrics, quota, tests
 
 BASE = Path(__file__).parent
 _cfg = get_config()
@@ -284,6 +286,21 @@ def api_pool_random(request: Request, operator: str | None = None, _: str = Depe
     return random.choice(proxies)
 
 
+@app.get("/api/pool/sticky/{key}")
+def api_pool_sticky(key: str, request: Request, ttl: int = 600,
+                    operator: str | None = None, _: str = Depends(api_auth)):
+    """Return the same live proxy for a given session key within its TTL."""
+    proxies = api_pool(request, operator, _)
+    if not proxies:
+        raise HTTPException(503, "no live proxy available")
+    by_imei = {p["imei"]: p for p in proxies}
+    imei = db.sticky_get(key)
+    if imei not in by_imei:                 # unset, expired, or no longer live
+        imei = random.choice(proxies)["imei"]
+    db.sticky_set(key, imei, max(1, ttl))
+    return by_imei[imei]
+
+
 # Public rotation hook — token-authenticated, no session. Lets external tools
 # rotate a single proxy's IP by hitting a secret URL (link rotation).
 @app.get("/hook/rotate/{token}")
@@ -311,6 +328,11 @@ def api_bw_series(imei: str, hours: int = 24, _: str = Depends(api_auth)):
 @app.get("/api/rotation-log")
 def api_rotlog(imei: str | None = None, limit: int = 100, _: str = Depends(api_auth)):
     return db.rotation_log(imei, limit)
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def prometheus_metrics():
+    return metrics.render()
 
 
 @app.get("/healthz")

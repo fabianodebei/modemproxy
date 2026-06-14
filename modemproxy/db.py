@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS rotation_log (
     reason          TEXT,
     ts              INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS sticky (
+    key             TEXT PRIMARY KEY,    -- caller-supplied session key
+    imei            TEXT REFERENCES modems(imei) ON DELETE CASCADE,
+    expires_at      INTEGER
+);
 """
 
 
@@ -173,6 +179,34 @@ def get_port(imei: str) -> dict[str, Any] | None:
 def delete_port(imei: str) -> None:
     with db() as conn:
         conn.execute("DELETE FROM ports WHERE imei=?", (imei,))
+
+
+def sticky_get(key: str) -> str | None:
+    """Return the IMEI bound to a session key if still valid, else None."""
+    with db() as conn:
+        r = conn.execute(
+            "SELECT imei, expires_at FROM sticky WHERE key=?", (key,)
+        ).fetchone()
+        if not r:
+            return None
+        if r["expires_at"] and r["expires_at"] < now():
+            conn.execute("DELETE FROM sticky WHERE key=?", (key,))
+            return None
+        return r["imei"]
+
+
+def sticky_set(key: str, imei: str, ttl: int) -> None:
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO sticky (key, imei, expires_at) VALUES (?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET imei=excluded.imei, expires_at=excluded.expires_at",
+            (key, imei, now() + ttl),
+        )
+
+
+def sticky_purge_expired() -> None:
+    with db() as conn:
+        conn.execute("DELETE FROM sticky WHERE expires_at < ?", (now(),))
 
 
 def get_port_by_token(token: str) -> dict[str, Any] | None:
