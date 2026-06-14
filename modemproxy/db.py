@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS ports (
     quota_bytes     INTEGER DEFAULT 0,    -- monthly traffic cap in bytes; 0 = unlimited
     quota_direction TEXT DEFAULT 'both',  -- in | out | both
     quota_locked    INTEGER DEFAULT 0,    -- 1 = auto-disabled by quota check
+    vpn_enabled     INTEGER DEFAULT 0,    -- 1 = per-modem OpenVPN server running
     enabled         INTEGER DEFAULT 1,
     created_at      INTEGER
 );
@@ -102,6 +103,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ports ADD COLUMN quota_bytes INTEGER DEFAULT 0")
         conn.execute("ALTER TABLE ports ADD COLUMN quota_direction TEXT DEFAULT 'both'")
         conn.execute("ALTER TABLE ports ADD COLUMN quota_locked INTEGER DEFAULT 0")
+    if "vpn_enabled" not in cols:
+        conn.execute("ALTER TABLE ports ADD COLUMN vpn_enabled INTEGER DEFAULT 0")
 
 
 @contextmanager
@@ -142,7 +145,7 @@ def list_modems() -> list[dict[str, Any]]:
         rows = conn.execute(
             "SELECT m.*, p.http_port, p.socks_port, p.username, p.password, "
             "p.rotation_interval, p.white_list, p.rotation_token, "
-            "p.quota_bytes, p.quota_direction, p.quota_locked, p.enabled "
+            "p.quota_bytes, p.quota_direction, p.quota_locked, p.vpn_enabled, p.enabled "
             "FROM modems m LEFT JOIN ports p ON p.imei = m.imei "
             "ORDER BY m.name"
         ).fetchall()

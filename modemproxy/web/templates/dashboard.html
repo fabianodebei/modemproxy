@@ -263,6 +263,23 @@
                 </div>
               </div>
 
+              <!-- OpenVPN -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">OpenVPN</p>
+                <template x-if="!selected.vpn_enabled">
+                  <button @click="vpnEnable(selected)" :disabled="busy"
+                          class="w-full px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Enable VPN server</button>
+                </template>
+                <template x-if="selected.vpn_enabled">
+                  <div class="flex gap-2">
+                    <a :href="`/api/modems/${selected.imei}/vpn/export`"
+                       class="flex-1 text-center px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-sm">Download .ovpn</a>
+                    <button @click="vpnDisable(selected)" :disabled="busy"
+                            class="px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Disable</button>
+                  </div>
+                </template>
+              </div>
+
               <div class="flex gap-2 pt-2">
                 <button @click="rotate(selected)" :disabled="busy" class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Rotate IP</button>
                 <button @click="reset(selected)" :disabled="busy" class="flex-1 px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">Reset modem</button>
@@ -328,6 +345,8 @@ function dashboard(){
     async connTest(m){ this.testResult={loading:true}; this.testResult=await this.api('POST',`/api/modems/${m.imei}/conn-test`); },
     async runSpeedtest(m){ this.speedResult={loading:true}; this.speedResult=await this.api('POST',`/api/modems/${m.imei}/speedtest`); },
     async setQuota(m){ await this.api('POST',`/api/modems/${m.imei}/quota`,{quota_bytes:Math.round(this.newQuotaMB*1048576),quota_direction:this.newQuotaDir}); await this.refresh(); this.notify(this.newQuotaMB>0?`Quota ${this.newQuotaMB} MB/mo`:'Quota off'); },
+    async vpnEnable(m){ const r=await this.api('POST',`/api/modems/${m.imei}/vpn/enable`); await this.refresh(); this.notify(`VPN up on udp/${r.port}`); },
+    async vpnDisable(m){ await this.api('POST',`/api/modems/${m.imei}/vpn/disable`); await this.refresh(); this.notify('VPN disabled'); },
     connStrings(m){
       const a = m.username?`${m.username}:${m.password}@`:'';
       return [

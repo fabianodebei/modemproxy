@@ -28,13 +28,15 @@ Status of feature parity with a full commercial modem-proxy manager.
   TTL window
 - Prometheus `/metrics` — pool health + per-modem signal, online, month traffic
 - Web panel: Pool page (live proxies + copy) and Activity page (rotation log)
+- OpenVPN per-modem export — internal EC CA, per-modem server instance +
+  policy-routed egress, single-file `.ovpn` download from the panel
 
 ## Next
-- **OpenVPN per-modem export** — download a client config per modem (needs a
-  per-modem OpenVPN server on the box).
+- **OS/TCP fingerprint spoofing layer** (p0f / osfooler) — last major
+  ProxySmart parity item.
+- **API keys** — let pool consumers authenticate without the admin password.
 
 ## Later
-- OS/TCP fingerprint spoofing layer (p0f / osfooler)
-- Multi-IP allocation
+- Multi-IP allocation / sticky IP pinning
 - Postgres backend option for multi-node
 - Redis-backed pool for cross-node allocation at scale

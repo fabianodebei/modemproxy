@@ -117,6 +117,22 @@ Each entry includes ready-to-use `http` and `socks5` connection strings.
 curl -u admin:PASS "http://SERVER_IP:6997/api/pool/sticky/user-42?ttl=600"
 ```
 
+## OpenVPN per-modem
+
+Each modem can run its own OpenVPN server whose clients egress through that
+SIM. Set `vpn_public_host` in the config to your server's public IP, then from
+the panel drawer: **Enable VPN server** → **Download .ovpn**. Or via CLI:
+
+```bash
+modemproxy vpn-enable <imei>
+modemproxy vpn-export <imei> --out modem1.ovpn
+```
+
+An internal EC CA is created on first use; each modem gets a UDP port
+(`1190 + index`) and a `10.8.<index>.0/24` subnet, policy-routed and
+MASQUERADEd out the modem interface. Requires the box to run as root with
+IP forwarding (the installer pulls `openvpn`, `iproute2`, `iptables`).
+
 ## Monitoring
 
 Prometheus metrics (no auth) at `/metrics`: `modemproxy_modems_total`,

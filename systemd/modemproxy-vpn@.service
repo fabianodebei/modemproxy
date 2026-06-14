@@ -1,0 +1,13 @@
+[Unit]
+Description=modemproxy OpenVPN server for modem %i
+After=network.target ModemManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/openvpn --config /etc/modemproxy/vpn/server-%i.conf
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

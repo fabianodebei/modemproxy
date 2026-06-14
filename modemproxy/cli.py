@@ -12,7 +12,7 @@ import sys
 from . import db
 from .modems import control, manager
 from .proxy import generator
-from .services import bandwidth, quota, tests
+from .services import bandwidth, openvpn, quota, tests
 
 
 def _print_json(obj) -> None:
@@ -131,6 +131,28 @@ def cmd_speedtest(args) -> int:
     return 0
 
 
+def cmd_vpn_enable(args) -> int:
+    _print_json(openvpn.enable_vpn(args.imei))
+    return 0
+
+
+def cmd_vpn_disable(args) -> int:
+    openvpn.disable_vpn(args.imei)
+    print(f"vpn disabled for {args.imei}")
+    return 0
+
+
+def cmd_vpn_export(args) -> int:
+    text = openvpn.export_client(args.imei)
+    if args.out:
+        with open(args.out, "w") as f:
+            f.write(text)
+        print(f"wrote {args.out}")
+    else:
+        print(text)
+    return 0
+
+
 def cmd_list_sms(args) -> int:
     mid = manager._mm_id_for(args.imei)
     if not mid:
@@ -240,6 +262,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("imei")
     sp.add_argument("bytes", type=int)
     sp.add_argument("--direction", choices=["in", "out", "both"], default="both")
+
+    sp = add("vpn-enable", cmd_vpn_enable, "start a per-modem OpenVPN server")
+    sp.add_argument("imei")
+
+    sp = add("vpn-disable", cmd_vpn_disable, "stop a per-modem OpenVPN server")
+    sp.add_argument("imei")
+
+    sp = add("vpn-export", cmd_vpn_export, "export a client .ovpn for a modem")
+    sp.add_argument("imei")
+    sp.add_argument("--out", help="write to file instead of stdout")
 
     sp = add("send-ussd", cmd_send_ussd, "send a USSD code (e.g. balance check)")
     sp.add_argument("imei")

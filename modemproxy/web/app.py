@@ -24,7 +24,7 @@ import random
 
 from ..modems import control, manager
 from ..proxy import generator
-from ..services import bandwidth, metrics, quota, tests
+from ..services import bandwidth, metrics, openvpn, quota, tests
 
 BASE = Path(__file__).parent
 _cfg = get_config()
@@ -277,6 +277,32 @@ async def api_set_quota(imei: str, request: Request, _: str = Depends(api_auth))
 @app.get("/api/modems/{imei}/quota")
 def api_quota_status(imei: str, _: str = Depends(api_auth)):
     return quota.status(imei)
+
+
+@app.post("/api/modems/{imei}/vpn/enable")
+def api_vpn_enable(imei: str, _: str = Depends(api_auth)):
+    try:
+        return openvpn.enable_vpn(imei)
+    except openvpn.VPNError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/modems/{imei}/vpn/disable")
+def api_vpn_disable(imei: str, _: str = Depends(api_auth)):
+    openvpn.disable_vpn(imei)
+    return {"ok": True}
+
+
+@app.get("/api/modems/{imei}/vpn/export")
+def api_vpn_export(imei: str, _: str = Depends(api_auth)):
+    try:
+        text = openvpn.export_client(imei)
+    except openvpn.VPNError as e:
+        raise HTTPException(400, str(e))
+    m = db.get_modem(imei) or {}
+    fname = f"modemproxy-{m.get('name') or imei}.ovpn"
+    return PlainTextResponse(text, headers={
+        "Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 # --- allocation pool -------------------------------------------------------

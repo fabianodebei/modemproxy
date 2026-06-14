@@ -38,6 +38,7 @@ apt-get install -y -qq \
     git python3 python3-venv python3-pip \
     modemmanager libqmi-utils libmbim-utils \
     3proxy usbutils uhubctl curl ca-certificates \
+    openvpn openssl iproute2 iptables \
     || die "apt install failed"
 
 systemctl enable --now ModemManager.service || true

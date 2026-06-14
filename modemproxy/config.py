@@ -41,6 +41,9 @@ class Config:
     online_check_url: str = "http://connectivitycheck.gstatic.com/generate_204"
     max_parallel_workers: int = 4
 
+    # OpenVPN export
+    vpn_public_host: str = ""   # public IP/host clients dial; blank = placeholder
+
     # Database
     db_path: str = str(STATE_DIR / "modemproxy.db")
 
