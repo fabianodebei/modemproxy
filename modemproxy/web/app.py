@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
@@ -28,7 +29,15 @@ from ..services import bandwidth, metrics, openvpn, quota, tests
 
 BASE = Path(__file__).parent
 _cfg = get_config()
-app = FastAPI(title="modemproxy", docs_url="/api/docs")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    db.init_db()
+    yield
+
+
+app = FastAPI(title="modemproxy", docs_url="/api/docs", lifespan=_lifespan)
 app.add_middleware(SessionMiddleware, secret_key=_cfg.session_secret,
                    session_cookie="modemproxy_session", max_age=86400 * 7)
 templates = Jinja2Templates(directory=str(BASE / "templates"))
@@ -101,11 +110,6 @@ class _RedirectToLogin(Exception):
 @app.exception_handler(_RedirectToLogin)
 async def _redirect_login(request: Request, exc: _RedirectToLogin):
     return RedirectResponse("/login", status_code=303)
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    db.init_db()
 
 
 # --- login -----------------------------------------------------------------

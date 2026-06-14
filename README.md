@@ -21,6 +21,15 @@ build step):
 > Original, independent implementation. Not affiliated with any commercial
 > proxy-management product.
 
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest          # 34 tests: db, generator, bandwidth, quota, openvpn, metrics, API
+```
+
+CI runs the suite on Python 3.10 and 3.12 (see `.github/workflows/ci.yml`).
+
 ## Install (Ubuntu 22.04 / 24.04)
 
 This is a **private repo**, so the installer needs a GitHub token — a

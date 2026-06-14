@@ -21,8 +21,15 @@ dependencies = [
     "itsdangerous>=2.1",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 modemproxy = "modemproxy.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
 
 [tool.setuptools.packages.find]
 include = ["modemproxy*"]
