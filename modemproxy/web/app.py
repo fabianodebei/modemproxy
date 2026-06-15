@@ -232,12 +232,21 @@ def settings_page(request: Request, user: str = Depends(ui_auth)):
         custs.append(c)
     all_modems = [{"imei": m["imei"], "name": m.get("name") or m["imei"][-6:]}
                   for m in db.list_modems() if m.get("http_port")]
+    from ..services.tunnel import machine_data, public_key, tunnel_active
+    tunnel = {
+        "machine_data": machine_data(),
+        "public_key": public_key() or "",
+        "active": tunnel_active(),
+        "host": cfg.ssh_tunnel_host,
+        "user": cfg.ssh_tunnel_user,
+        "port": cfg.ssh_tunnel_port,
+    }
     return templates.TemplateResponse(
         request, "settings.html",
         {"user": user, "keys": db.api_key_list(),
          "access": access, "publish": publish.status(),
          "branding": branding, "alerting": alerting, "advanced": advanced,
-         "customers": custs, "all_modems": all_modems},
+         "customers": custs, "all_modems": all_modems, "tunnel": tunnel},
     )
 
 
@@ -618,6 +627,35 @@ async def api_settings_update(request: Request, _: str = Depends(admin_auth)):
 def api_alert_test(_: str = Depends(admin_auth)):
     from ..services import alerts
     return {"sent": alerts.notify("test alert — modemproxy is wired up ✅")}
+
+
+@app.get("/api/tunnel")
+def api_tunnel_get(_: str = Depends(admin_auth)):
+    from ..services.tunnel import machine_data, public_key, tunnel_active
+    cfg = get_config()
+    return {
+        "machine_data": machine_data(),
+        "public_key": public_key(),
+        "active": tunnel_active(),
+        "host": cfg.ssh_tunnel_host,
+        "user": cfg.ssh_tunnel_user,
+        "port": cfg.ssh_tunnel_port,
+    }
+
+
+@app.post("/api/tunnel")
+async def api_tunnel_save(request: Request, _: str = Depends(admin_auth)):
+    from ..config import update_config
+    from ..services import tunnel
+    body = await request.json() if await request.body() else {}
+    allowed = {"ssh_tunnel_host", "ssh_tunnel_user", "ssh_tunnel_port"}
+    update_config({k: v for k, v in (body or {}).items() if k in allowed})
+    cfg = get_config()
+    try:
+        tunnel.sync(cfg.ssh_tunnel_host, cfg.ssh_tunnel_user, cfg.ssh_tunnel_port)
+    except Exception:
+        pass  # systemctl may not exist in dev/test environment
+    return {"ok": True, "active": tunnel.tunnel_active()}
 
 
 @app.post("/api/modems/{imei}/expiry")

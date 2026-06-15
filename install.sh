@@ -44,7 +44,7 @@ apt-get install -y -qq \
     usb-modeswitch usb-modeswitch-data ppp \
     usbutils uhubctl curl wget ca-certificates \
     openvpn openssl iproute2 iptables \
-    isc-dhcp-client \
+    isc-dhcp-client autossh openssh-client \
     net-tools dnsutils procps jq \
     || die "apt install failed"
 
@@ -198,6 +198,18 @@ fi
 # config holds admin_password + session_secret: root-write, group-read only
 chown root:modemproxy "$CONF" || true
 chmod 640 "$CONF" || true
+
+log "Generating SSH keypair for remote support tunnel"
+TUNNEL_KEY="$CONF_DIR/tunnel_key"
+if [ ! -f "$TUNNEL_KEY" ]; then
+    ssh-keygen -t ed25519 -N "" -C "modemproxy@$(hostname -s)" -f "$TUNNEL_KEY" >/dev/null
+    chmod 600 "$TUNNEL_KEY"
+    chmod 644 "${TUNNEL_KEY}.pub"
+    chown root:root "$TUNNEL_KEY" "${TUNNEL_KEY}.pub"
+    log "SSH keypair generated: ${TUNNEL_KEY}.pub"
+else
+    log "SSH keypair already exists — skipping"
+fi
 
 log "Installing systemd units + udev rules"
 cp "$SRC/systemd/"*.service "$SRC/systemd/"*.timer /etc/systemd/system/

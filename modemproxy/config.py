@@ -98,6 +98,15 @@ class Config:
     score_ip_not_detected: int = 10
     score_offline: int = 20
 
+    # Reverse SSH tunnel (vendor remote support access)
+    #   The server's generated public key must be added to the VPS
+    #   authorized_keys (/home/<ssh_tunnel_user>/.ssh/authorized_keys).
+    #   Once configured, modemproxy-tunnel.service keeps a persistent
+    #   reverse tunnel: vendor SSHes to VPS port ssh_tunnel_port to reach this box.
+    ssh_tunnel_host: str = ""           # VPS public IP or hostname
+    ssh_tunnel_user: str = "fwd"        # SSH user on VPS
+    ssh_tunnel_port: int = 2222         # remote port on VPS → localhost:22
+
     # Database
     db_path: str = str(STATE_DIR / "modemproxy.db")
 

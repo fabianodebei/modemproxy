@@ -4,6 +4,71 @@
 {% block page_title %}Settings{% endblock %}
 
 {% block main %}
+{# ── Remote Support (reverse SSH tunnel) ─────────────────────────────── #}
+<div x-data="tunnelCard()" x-init="init()" class="max-w-2xl mb-6">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h2 class="text-sm font-medium text-slate-200">Remote Support</h2>
+        <p class="text-xs text-slate-500">Reverse SSH tunnel — lets vendor access this server remotely.</p>
+      </div>
+      <span :class="active ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-700 text-slate-500'"
+            class="text-xs px-2 py-0.5 rounded-full" x-text="active ? 'tunnel active' : 'not connected'"></span>
+    </div>
+
+    <div class="mb-3">
+      <p class="text-xs text-slate-400 mb-1">Machine Data</p>
+      <div class="flex items-center gap-2">
+        <code class="flex-1 text-xs font-mono bg-ink-900/60 rounded-lg px-3 py-2 text-slate-300 break-all select-all">{{ tunnel.machine_data }}</code>
+        <button @click="copy('{{ tunnel.machine_data }}')" class="text-brand-400 hover:text-brand-300 text-xs shrink-0">copy</button>
+      </div>
+    </div>
+
+    {% if tunnel.public_key %}
+    <div class="mb-4">
+      <p class="text-xs text-slate-400 mb-1">Public SSH key
+        <span class="text-slate-500">(add to VPS <code>/home/{{ tunnel.user }}/.ssh/authorized_keys</code>)</span>
+      </p>
+      <div class="flex items-start gap-2">
+        <code class="flex-1 text-xs font-mono bg-ink-900/60 rounded-lg px-3 py-2 text-slate-300 break-all leading-relaxed select-all" style="max-height:6rem;overflow-y:auto">{{ tunnel.public_key }}</code>
+        <button @click="copy(`{{ tunnel.public_key }}`)" class="text-brand-400 hover:text-brand-300 text-xs shrink-0 mt-1">copy</button>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-xs text-amber-400 mb-4">SSH key not found — re-run install.sh to generate it.</p>
+    {% endif %}
+
+    <div class="space-y-3">
+      <div class="flex gap-2">
+        <label class="block text-xs text-slate-400 flex-1">VPS host
+          <input x-model="host" placeholder="e.g. vps.example.com"
+                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+        <label class="block text-xs text-slate-400 w-24">SSH user
+          <input x-model="user"
+                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+        <label class="block text-xs text-slate-400 w-24">Remote port
+          <input x-model.number="port" type="number"
+                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        </label>
+      </div>
+      <p class="text-xs text-slate-500">Vendor connects via:
+        <code x-show="host" x-cloak class="text-slate-300" x-text="`ssh -p ${port} ${user}@${host}  # on VPS: ssh -p ${port} simone@localhost`"></code>
+        <span x-show="!host">configure VPS host above first</span>
+      </p>
+    </div>
+
+    <div class="mt-4 flex items-center gap-3">
+      <button @click="save()" :disabled="busy"
+              class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-4 py-1.5 text-sm">Save & connect</button>
+      <button x-show="host" x-cloak @click="disconnect()" :disabled="busy"
+              class="bg-ink-700 hover:bg-ink-600 text-slate-300 rounded-lg px-3 py-1.5 text-sm">Disconnect</button>
+      <span x-show="msg" x-cloak class="text-xs text-emerald-300" x-text="msg"></span>
+    </div>
+  </div>
+</div>
+
 <div x-data="access()" class="max-w-2xl mb-6">
   <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
     <div class="mb-4">
@@ -268,6 +333,28 @@
 </div>
 
 <script>
+function tunnelCard(){
+  const t = {{ tunnel | tojson }};
+  return {
+    active: t.active, host: t.host||'', user: t.user||'fwd', port: t.port||2222,
+    busy: false, msg: '', _t: null,
+    init(){ this.active=t.active; },
+    flash(m){ this.msg=m; clearTimeout(this._t); this._t=setTimeout(()=>this.msg='',3000); },
+    async save(){
+      this.busy=true;
+      try{
+        const r=await (await fetch('/api/tunnel',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ssh_tunnel_host:this.host,ssh_tunnel_user:this.user,ssh_tunnel_port:this.port})})).json();
+        this.active=r.active; this.flash('Saved ✓');
+      } finally{ this.busy=false; }
+    },
+    async disconnect(){
+      this.host=''; await this.save();
+    },
+    copy(t){ if(t) navigator.clipboard.writeText(t); },
+  }
+}
 function custs(){
   return {
     list: {{ customers | tojson }}, modems: {{ all_modems | tojson }}, nu:'', np:'',

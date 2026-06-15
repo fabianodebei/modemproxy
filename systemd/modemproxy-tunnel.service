@@ -1,0 +1,27 @@
+[Unit]
+Description=modemproxy reverse SSH tunnel (vendor support access)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/modemproxy/tunnel.env
+# Bail out cleanly if the env file is missing or TUNNEL_HOST is unset
+ExecStartPre=/bin/sh -c 'test -n "${TUNNEL_HOST:-}"'
+ExecStart=/usr/bin/autossh \
+    -M 0 -N \
+    -o StrictHostKeyChecking=no \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
+    -i /etc/modemproxy/tunnel_key \
+    -R ${TUNNEL_PORT}:localhost:22 \
+    ${TUNNEL_USER}@${TUNNEL_HOST}
+Restart=always
+RestartSec=15
+# Don't spam restarts on auth failures
+StartLimitInterval=60
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target
