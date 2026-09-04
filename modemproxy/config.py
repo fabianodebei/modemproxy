@@ -78,6 +78,7 @@ class Config:
 
     # Net-mode dongle / router web UI
     default_hilink_password: str = ""     # admin password for ZTE/Huawei web API
+    deco_password: str = ""               # admin password for TP-Link Deco local API (rotation via reboot)
 
     # Anti-tethering: rewrite egress TTL so the carrier can't spot tethering
     custom_ttl: int = 0                    # 0 = off; typical value 65

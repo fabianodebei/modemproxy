@@ -18,7 +18,9 @@ import base64
 import hashlib
 import ipaddress
 import json
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -176,7 +178,7 @@ def _refresh_dev(dev: dict[str, Any], table: int, *, manual: bool = False,
     if model is None:
         vid, pid = _usb_ids(dev["iface"])
         model = _model_label(vid, pid, dev.get("driver"))
-    info = device_status(gw)  # signal %, operator from the device web API
+    info = device_status(gw, dev["iface"])  # signal %, operator from device web API
     # Online if it has a public IP OR the device reports signal/operator
     # (public_ip can transiently time out on a shared subnet).
     status = "online" if (pub or info.get("signal") or info.get("operator")) else "offline"
@@ -273,23 +275,56 @@ def register_manual(iface: str, *, gateway: str | None = None,
     return out
 
 
-def device_status(host: str) -> dict[str, Any]:
+def _http(iface: str | None, url: str, *, method: str = "GET",
+          data: dict[str, str] | None = None, body: str | None = None,
+          headers: dict[str, str] | None = None, cookies: str | None = None,
+          timeout: int = 8) -> tuple[bool, str]:
+    """HTTP request via curl, optionally bound to a network interface.
+
+    Two net-mode dongles frequently share the SAME gateway IP (e.g. two ZTE
+    sticks both at 192.168.0.1) and even the same host IP, so binding to the
+    dongle's *interface* (SO_BINDTODEVICE, what ``curl --interface`` does) is the
+    only way to reach the intended device. ``cookies`` is a cookie-jar path
+    reused across calls to keep a login session. Returns (ok, response_text).
+    """
+    args = ["curl", "-s", "--max-time", str(timeout)]
+    if iface:
+        args += ["--interface", iface]
+    if cookies:
+        args += ["-c", cookies, "-b", cookies]
+    for k, v in (headers or {}).items():
+        args += ["-H", f"{k}: {v}"]
+    if method == "POST":
+        args += ["-X", "POST"]
+        if body is not None:
+            args += ["--data-binary", body]
+        for k, v in (data or {}).items():
+            args += ["--data-urlencode", f"{k}={v}"]
+    try:
+        p = subprocess.run(args + [url], capture_output=True, text=True,
+                           timeout=timeout + 4)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False, ""
+    return p.returncode == 0, p.stdout
+
+
+def device_status(host: str, iface: str | None = None) -> dict[str, Any]:
     """Signal quality (%) and operator name from the dongle web API."""
-    return _status_zte(host) or _status_huawei(host) or {}
+    return _status_zte(host, iface) or _status_huawei(host, iface) or {}
 
 
-def _status_zte(host: str) -> dict[str, Any] | None:
+def _status_zte(host: str, iface: str | None = None) -> dict[str, Any] | None:
     """ZTE goform: signalbar (0-5), network_provider, network_type."""
     url = (f"http://{host}/goform/goform_get_cmd_process"
            "?isTest=false&multi_data=1"
            "&cmd=signalbar,network_provider,network_type,rssi,rscp")
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    ok, text = _http(iface, url, headers=headers, timeout=5)
+    if not ok or not text:
+        return None
     try:
-        r = httpx.get(url, headers=headers, timeout=5.0)
-        if r.status_code >= 400:
-            return None
-        d = r.json()
-    except (httpx.HTTPError, ValueError):
+        d = json.loads(text)
+    except ValueError:
         return None
     if "signalbar" not in d and "network_provider" not in d:
         return None
@@ -306,41 +341,33 @@ def _status_zte(host: str) -> dict[str, Any] | None:
     return out or None
 
 
-def _status_huawei(host: str) -> dict[str, Any] | None:
+def _status_huawei(host: str, iface: str | None = None) -> dict[str, Any] | None:
     """Huawei HiLink: /api/device/signal + /api/net/current-plmn."""
-    try:
-        sig = httpx.get(f"http://{host}/api/device/signal", timeout=5.0)
-        if sig.status_code >= 400 or "<rsrp>" not in sig.text and "<rssi>" not in sig.text:
-            return None
-    except httpx.HTTPError:
+    ok, text = _http(iface, f"http://{host}/api/device/signal", timeout=5)
+    if not ok or ("<rsrp>" not in text and "<rssi>" not in text):
         return None
     out: dict[str, Any] = {}
     # rsrp dBm -> rough %: -140 (0%) .. -44 (100%)
-    if "<rsrp>" in sig.text:
+    if "<rsrp>" in text:
         try:
-            rsrp = int(sig.text.split("<rsrp>")[1].split("dBm")[0].strip())
+            rsrp = int(text.split("<rsrp>")[1].split("dBm")[0].strip())
             out["signal"] = max(0, min(100, round((rsrp + 140) / 96 * 100)))
         except (ValueError, IndexError):
             pass
-    try:
-        plmn = httpx.get(f"http://{host}/api/net/current-plmn", timeout=5.0)
-        if "<FullName>" in plmn.text:
-            out["operator"] = plmn.text.split("<FullName>")[1].split("</FullName>")[0]
-    except httpx.HTTPError:
-        pass
+    ok2, plmn = _http(iface, f"http://{host}/api/net/current-plmn", timeout=5)
+    if ok2 and "<FullName>" in plmn:
+        out["operator"] = plmn.split("<FullName>")[1].split("</FullName>")[0]
     return out or None
 
 
 def _detect_gateway(dev: dict[str, Any]) -> str:
     """Probe known dongle API hosts reachable through this interface."""
+    iface = dev.get("iface")
     candidates = [dev["gateway"], *[g for g in KNOWN_GATEWAYS if g != dev["gateway"]]]
     for host in candidates:
-        try:
-            r = httpx.get(f"http://{host}/", timeout=3.0)
-            if r.status_code < 500:
-                return host
-        except httpx.HTTPError:
-            continue
+        ok, _ = _http(iface, f"http://{host}/", timeout=3)
+        if ok:
+            return host
     return dev["gateway"]
 
 
@@ -365,7 +392,14 @@ def rotate(modem: dict[str, Any]) -> str | None:
     if not host or not iface:
         raise NetdevError("net-mode dongle missing mgmt_host/iface")
 
-    ok = _rotate_zte(host) or _rotate_huawei(host)
+    # TP-Link Deco (app-managed CPE, no goform/HiLink API): rotate by rebooting
+    # the unit via its local encrypted API — the SIM re-dials and the carrier
+    # hands out a new CGNAT IP. Slower than a data re-dial (the Deco 5G takes a
+    # few minutes to come back), but it's the only exposed lever on this model.
+    if "deco" in (modem.get("model") or "").lower():
+        return _rotate_deco(host, iface)
+
+    ok = _rotate_zte(host, iface) or _rotate_huawei(host, iface)
     if not ok:
         raise NetdevError(f"no supported web API at {host} for {iface}")
 
@@ -374,91 +408,149 @@ def rotate(modem: dict[str, Any]) -> str | None:
     return public_ip(iface)
 
 
-def _zte_client(host: str) -> httpx.Client:
-    """Authenticated httpx client for ZTE goform set-commands.
+DECO_PASSWORD_FILE = "/etc/modemproxy/deco5g.pass"
+
+
+def _deco_password() -> str | None:
+    """Deco admin password: config.deco_password, else the root-only file."""
+    try:
+        pw = get_config().deco_password
+    except AttributeError:
+        pw = ""
+    if pw:
+        return pw
+    try:
+        return Path(DECO_PASSWORD_FILE).read_text().strip() or None
+    except OSError:
+        return None
+
+
+def _rotate_deco(host: str, iface: str) -> str | None:
+    """Reboot a TP-Link Deco via its local encrypted API (tplinkrouterc6u).
+
+    The reboot re-dials the SIM, yielding a new public IP. The Deco 5G can take
+    several minutes to reboot and re-register, so we wait (bounded) for the
+    egress IP to reappear and return it.
+    """
+    try:
+        from tplinkrouterc6u.client.deco import TPLinkDecoClient
+    except ImportError as e:
+        raise NetdevError("tplinkrouterc6u not installed "
+                          "(pip install tplinkrouterc6u)") from e
+    pw = _deco_password()
+    if not pw:
+        raise NetdevError(f"no Deco admin password (set {DECO_PASSWORD_FILE})")
+    before = public_ip(iface)
+    try:
+        c = TPLinkDecoClient(host, pw, verify_ssl=False, timeout=30)
+        c.authorize()
+        c.reboot()
+    except Exception as e:
+        raise NetdevError(f"Deco reboot failed: {e}") from e
+    import time
+    for _ in range(40):            # up to ~10 min for reboot + 5G re-registration
+        time.sleep(15)
+        ip = public_ip(iface)
+        if ip and ip != before:
+            return ip
+    return public_ip(iface)
+
+
+def _zte_login(host: str, iface: str | None, cj: str) -> None:
+    """Log into a ZTE goform session (cookie jar ``cj``), if a password is set.
 
     Set commands (rotation, reboot) on CPE like the MC801A require a login
-    session. Status/get commands usually don't. Uses the configured HiLink
-    admin password; falls back to an unauthenticated client if none is set.
+    session; status/get commands usually don't. Bound to ``iface`` so two ZTE
+    devices sharing 192.168.0.1 don't get crossed.
     """
-    c = httpx.Client(timeout=8.0, headers={
-        "Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"})
     pw = get_config().default_hilink_password
     if not pw:
-        return c
+        return
+    headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
     base = f"http://{host}/goform"
-    try:
-        # ZTE LD-challenge: final = SHA256( SHA256(pw)_UPPER + LD )_UPPER
-        ld = ""
-        r = c.get(f"{base}/goform_get_cmd_process?isTest=false&cmd=LD")
+    # ZTE LD-challenge: final = SHA256( SHA256(pw)_UPPER + LD )_UPPER
+    ld = ""
+    ok, text = _http(iface, f"{base}/goform_get_cmd_process?isTest=false&cmd=LD",
+                     headers=headers, cookies=cj)
+    if ok and text:
         try:
-            ld = r.json().get("LD", "")
+            ld = json.loads(text).get("LD", "")
         except ValueError:
             ld = ""
-        if ld:
-            h1 = hashlib.sha256(pw.encode()).hexdigest().upper()
-            pwd = hashlib.sha256((h1 + ld).encode()).hexdigest().upper()
-        else:
-            pwd = base64.b64encode(pw.encode()).decode()
-        c.post(f"{base}/goform_set_cmd_process",
-               data={"isTest": "false", "goformId": "LOGIN", "password": pwd})
-    except httpx.HTTPError:
-        pass
-    return c
+    if ld:
+        h1 = hashlib.sha256(pw.encode()).hexdigest().upper()
+        pwd = hashlib.sha256((h1 + ld).encode()).hexdigest().upper()
+    else:
+        pwd = base64.b64encode(pw.encode()).decode()
+    _http(iface, f"{base}/goform_set_cmd_process", method="POST",
+          data={"isTest": "false", "goformId": "LOGIN", "password": pwd},
+          headers=headers, cookies=cj)
 
 
-def _rotate_zte(host: str) -> bool:
+def _rotate_zte(host: str, iface: str | None = None) -> bool:
     """ZTE goform: disconnect then connect the data network (authed)."""
     base = f"http://{host}/goform/goform_set_cmd_process"
+    headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    cj = tempfile.mktemp(prefix="mp_zte_")
     try:
-        with _zte_client(host) as c:
-            r1 = c.post(base, data={"isTest": "false", "goformId": "DISCONNECT_NETWORK"})
-            if r1.status_code >= 400:
-                return False
-            import time
-            time.sleep(2)
-            c.post(base, data={"isTest": "false", "goformId": "CONNECT_NETWORK"})
+        _zte_login(host, iface, cj)
+        ok, _ = _http(iface, base, method="POST", headers=headers, cookies=cj,
+                      data={"isTest": "false", "goformId": "DISCONNECT_NETWORK"})
+        if not ok:
+            return False
+        import time
+        time.sleep(2)
+        _http(iface, base, method="POST", headers=headers, cookies=cj,
+              data={"isTest": "false", "goformId": "CONNECT_NETWORK"})
         return True
-    except httpx.HTTPError:
-        return False
+    finally:
+        try:
+            os.unlink(cj)
+        except OSError:
+            pass
 
 
-def reboot_zte(host: str) -> bool:
+def reboot_zte(host: str, iface: str | None = None) -> bool:
     """Reboot a ZTE dongle/router via the web API (authed)."""
+    headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    cj = tempfile.mktemp(prefix="mp_zte_")
     try:
-        with _zte_client(host) as c:
-            r = c.post(f"http://{host}/goform/goform_set_cmd_process",
-                       data={"isTest": "false", "goformId": "REBOOT_DEVICE"})
-            return r.status_code < 400
-    except httpx.HTTPError:
-        return False
+        _zte_login(host, iface, cj)
+        ok, _ = _http(iface, f"http://{host}/goform/goform_set_cmd_process",
+                      method="POST", headers=headers, cookies=cj,
+                      data={"isTest": "false", "goformId": "REBOOT_DEVICE"})
+        return ok
+    finally:
+        try:
+            os.unlink(cj)
+        except OSError:
+            pass
 
 
-def _rotate_huawei(host: str) -> bool:
+def _rotate_huawei(host: str, iface: str | None = None) -> bool:
     """Huawei HiLink: toggle mobile data off/on via the dialup API."""
     api = f"http://{host}/api"
+    cj = tempfile.mktemp(prefix="mp_hw_")
     try:
-        with httpx.Client(timeout=8.0) as c:
-            tok = c.get(f"{api}/webserver/SesTokInfo", timeout=5.0)
-            headers = {}
-            if "<TokInfo>" in tok.text:
-                token = tok.text.split("<TokInfo>")[1].split("</TokInfo>")[0]
-                headers["__RequestVerificationToken"] = token
-                if "<SesInfo>" in tok.text:
-                    sess = tok.text.split("<SesInfo>")[1].split("</SesInfo>")[0]
-                    headers["Cookie"] = sess
-            off = ('<?xml version="1.0" encoding="UTF-8"?>'
-                   "<request><dataswitch>0</dataswitch></request>")
-            on = ('<?xml version="1.0" encoding="UTF-8"?>'
-                  "<request><dataswitch>1</dataswitch></request>")
-            r = c.post(f"{api}/dialup/mobile-dataswitch", content=off,
-                       headers={**headers, "Content-Type": "text/xml"})
-            if r.status_code >= 400 or "error" in r.text.lower():
-                return False
-            import time
-            time.sleep(2)
-            c.post(f"{api}/dialup/mobile-dataswitch", content=on,
-                   headers={**headers, "Content-Type": "text/xml"})
+        ok, tok = _http(iface, f"{api}/webserver/SesTokInfo", cookies=cj, timeout=5)
+        headers = {"Content-Type": "text/xml"}
+        if ok and "<TokInfo>" in tok:
+            headers["__RequestVerificationToken"] = tok.split("<TokInfo>")[1].split("</TokInfo>")[0]
+        off = ('<?xml version="1.0" encoding="UTF-8"?>'
+               "<request><dataswitch>0</dataswitch></request>")
+        on = ('<?xml version="1.0" encoding="UTF-8"?>'
+              "<request><dataswitch>1</dataswitch></request>")
+        ok1, resp = _http(iface, f"{api}/dialup/mobile-dataswitch", method="POST",
+                          body=off, headers=headers, cookies=cj)
+        if not ok1 or "error" in resp.lower():
+            return False
+        import time
+        time.sleep(2)
+        _http(iface, f"{api}/dialup/mobile-dataswitch", method="POST",
+              body=on, headers=headers, cookies=cj)
         return True
-    except httpx.HTTPError:
-        return False
+    finally:
+        try:
+            os.unlink(cj)
+        except OSError:
+            pass
