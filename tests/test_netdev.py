@@ -87,13 +87,10 @@ def test_generator_binds_netdev_to_local_ip():
 
 
 def test_status_zte_parses_signal_and_operator(monkeypatch):
-    class FakeResp:
-        status_code = 200
-        def json(self):
-            return {"signalbar": "2", "network_provider": "WINDTRE",
-                    "network_type": "LTE", "rssi": "", "rscp": ""}
-    monkeypatch.setattr(netdev.httpx, "get", lambda *a, **k: FakeResp())
-    info = netdev._status_zte("192.168.0.1")
+    payload = ('{"signalbar": "2", "network_provider": "WINDTRE", '
+               '"network_type": "LTE", "rssi": "", "rscp": ""}')
+    monkeypatch.setattr(netdev, "_http", lambda *a, **k: (True, payload))
+    info = netdev._status_zte("192.168.0.1", "enx0")
     assert info["signal"] == 40       # 2 of 5 bars -> 40%
     assert info["operator"] == "WINDTRE"
 
@@ -102,7 +99,8 @@ def test_register_manual_lan_router(monkeypatch):
     monkeypatch.setattr(netdev, "_iface_ipv4", lambda i: "192.168.0.50")
     monkeypatch.setattr(netdev, "setup_routing", lambda *a, **k: None)
     monkeypatch.setattr(netdev, "public_ip", lambda i: "88.1.2.3")
-    monkeypatch.setattr(netdev, "device_status", lambda h: {"signal": 80, "operator": "WINDTRE"})
+    monkeypatch.setattr(netdev, "device_status",
+                        lambda h, i=None: {"signal": 80, "operator": "WINDTRE"})
 
     info = netdev.register_manual("eth1", name="cpe1", model="ZTE MC801A")
     assert info["imei"] == "net-eth1"
@@ -130,7 +128,7 @@ def test_discover_refreshes_manual_router(monkeypatch):
     monkeypatch.setattr(netdev, "_iface_ipv4", lambda i: "192.168.0.50")
     monkeypatch.setattr(netdev, "setup_routing", lambda *a, **k: None)
     monkeypatch.setattr(netdev, "public_ip", lambda i: "88.1.2.3")
-    monkeypatch.setattr(netdev, "device_status", lambda h: {"signal": 60})
+    monkeypatch.setattr(netdev, "device_status", lambda h, i=None: {"signal": 60})
 
     out = netdev.discover()
     assert any(r["imei"] == "net-eth1" for r in out)
@@ -146,11 +144,11 @@ def test_rotate_netdev_uses_web_api(monkeypatch):
                     bind_ip="192.168.0.203", mgmt_host="192.168.0.1",
                     rt_table=100, ip="5.6.7.8", status="online")
     from modemproxy.modems import manager
-    monkeypatch.setattr(netdev, "_rotate_zte", lambda host: True)
-    monkeypatch.setattr(netdev, "_rotate_huawei", lambda host: False)
+    monkeypatch.setattr(netdev, "_rotate_zte", lambda host, iface=None: True)
+    monkeypatch.setattr(netdev, "_rotate_huawei", lambda host, iface=None: False)
     monkeypatch.setattr(netdev, "public_ip", lambda i: "9.9.9.9")
     import modemproxy.modems.netdev as nd
-    monkeypatch.setattr(nd, "_rotate_zte", lambda host: True)
+    monkeypatch.setattr(nd, "_rotate_zte", lambda host, iface=None: True)
     monkeypatch.setattr("time.sleep", lambda s: None)
 
     res = manager.rotate(imei)
