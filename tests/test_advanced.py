@@ -12,22 +12,16 @@ def test_zte_login_uses_ld_hash(monkeypatch):
                         lambda *a, **k: Config(default_hilink_password="secret"))
     posted = {}
 
-    class FakeClient:
-        def __init__(self, *a, **k): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-        def get(self, url):
-            class R:
-                def json(self_): return {"LD": "ABCD"}
-            return R()
-        def post(self, url, data=None):
-            posted.update(data or {})
-            class R: status_code = 200
-            return R()
-        def close(self): pass
+    def fake_http(iface, url, *, method="GET", data=None, body=None,
+                  headers=None, cookies=None, timeout=8):
+        if "cmd=LD" in url:
+            return True, '{"LD": "ABCD"}'
+        if data and data.get("goformId") == "LOGIN":
+            posted.update(data)
+        return True, ""
 
-    monkeypatch.setattr(netdev.httpx, "Client", FakeClient)
-    netdev._zte_client("192.168.0.1")
+    monkeypatch.setattr(netdev, "_http", fake_http)
+    netdev._zte_login("192.168.0.1", "enx0", "/tmp/cj_test")
     h1 = hashlib.sha256(b"secret").hexdigest().upper()
     expected = hashlib.sha256((h1 + "ABCD").encode()).hexdigest().upper()
     assert posted["goformId"] == "LOGIN"
