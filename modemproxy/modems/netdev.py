@@ -178,7 +178,9 @@ def _refresh_dev(dev: dict[str, Any], table: int, *, manual: bool = False,
     if model is None:
         vid, pid = _usb_ids(dev["iface"])
         model = _model_label(vid, pid, dev.get("driver"))
-    info = device_status(gw, dev["iface"])  # signal %, operator from device web API
+    # Bind status calls to the iface only for auto USB dongles (shared IPs);
+    # manual LAN routers have a unique IP reached via the main table.
+    info = device_status(gw, None if manual else dev["iface"])
     # Online if it has a public IP OR the device reports signal/operator
     # (public_ip can transiently time out on a shared subnet).
     status = "online" if (pub or info.get("signal") or info.get("operator")) else "offline"
@@ -399,7 +401,13 @@ def rotate(modem: dict[str, Any]) -> str | None:
     if "deco" in (modem.get("model") or "").lower():
         return _rotate_deco(host, iface)
 
-    ok = _rotate_zte(host, iface) or _rotate_huawei(host, iface)
+    # Interface-bind the web-API calls ONLY for auto-discovered USB dongles,
+    # which can share a gateway IP (two ZTE sticks at 192.168.0.1) and each sit
+    # on their own link. Manually-added LAN routers (MC801A) have a unique IP
+    # reachable via the main table; SO_BINDTODEVICE onto their macvlan is both
+    # unnecessary and flaky (same subnet as the parent), so don't bind.
+    api_iface = None if modem.get("manual") else iface
+    ok = _rotate_zte(host, api_iface) or _rotate_huawei(host, api_iface)
     if not ok:
         raise NetdevError(f"no supported web API at {host} for {iface}")
 
