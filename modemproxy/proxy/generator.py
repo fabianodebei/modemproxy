@@ -37,9 +37,30 @@ def allocate_port(imei: str, *, username: str | None = None,
     """Create/refresh the port record for a modem and pick free ports."""
     cfg = get_config()
     existing = db.get_port(imei)
+    http_port = (existing or {}).get("http_port")
+    socks_port = (existing or {}).get("socks_port")
+    if not http_port or not socks_port:
+        # Ports already handed to OTHER modems — the positional index alone can
+        # collide (indices shift as modems are added/removed), so skip taken ports.
+        used_http, used_socks = set(), set()
+        for m in db.list_modems():
+            if m["imei"] == imei:
+                continue
+            p = db.get_port(m["imei"])
+            if p and p.get("http_port"):
+                used_http.add(p["http_port"])
+            if p and p.get("socks_port"):
+                used_socks.add(p["socks_port"])
+        idx = _modem_index(imei)
+        h = cfg.http_port_base + idx
+        while h in used_http:
+            h += 1
+        s = cfg.socks_port_base + idx
+        while s in used_socks:
+            s += 1
+        http_port = http_port or h
+        socks_port = socks_port or s
     idx = _modem_index(imei)
-    http_port = (existing or {}).get("http_port") or cfg.http_port_base + idx
-    socks_port = (existing or {}).get("socks_port") or cfg.socks_port_base + idx
     if auth:
         username = username or (existing or {}).get("username") or f"u{idx}"
         password = password or (existing or {}).get("password") or secrets.token_hex(8)
