@@ -353,6 +353,21 @@ def api_regen(imei: str, _: str = Depends(api_auth)):
     return generator.regenerate_credentials(imei)
 
 
+@app.post("/api/modems/{imei}/name")
+async def api_set_name(imei: str, request: Request, _: str = Depends(api_auth)):
+    body = await request.json()
+    name = ((body or {}).get("name") or "").strip()
+    db.upsert_modem(imei, name=name or None)
+    return {"ok": True, "name": name}
+
+
+@app.post("/api/modems/{imei}/disable")
+def api_disable(imei: str, _: str = Depends(api_auth)):
+    """Take a modem offline: stop its proxy but keep its port/credentials."""
+    generator.stop_proxy(imei)
+    return {"ok": True}
+
+
 @app.post("/api/modems/{imei}/rotation-interval")
 async def api_set_interval(imei: str, request: Request, _: str = Depends(api_auth)):
     body = await request.json()

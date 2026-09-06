@@ -134,10 +134,18 @@ def _prefix(entry: dict[str, Any], ipv4: str) -> int:
     return 24
 
 
-def public_ip(iface: str) -> str | None:
-    """Public WAN IP as seen through a specific interface."""
+def public_ip(iface: str, bind: str | None = None) -> str | None:
+    """Public WAN IP as seen through a modem.
+
+    ``bind`` (a source IP) is used when given: curl's ``--interface`` accepts an
+    address and binds the source, which is reliable for macvlan LAN routers whose
+    subnet overlaps the parent (SO_BINDTODEVICE onto them is flaky). Without it we
+    bind to the interface by name — needed for USB dongles that share a source IP
+    but sit on their own link.
+    """
+    binder = bind or iface
     for url in ("https://api.ipify.org", "http://ifconfig.me/ip"):
-        rc, out, _ = _run(["curl", "-s", "--max-time", "12", "--interface", iface, url], timeout=15)
+        rc, out, _ = _run(["curl", "-s", "--max-time", "12", "--interface", binder, url], timeout=15)
         ip = out.strip()
         if rc == 0 and ip and len(ip) <= 45 and ip.count(".") == 3:
             return ip
@@ -174,11 +182,17 @@ def _refresh_dev(dev: dict[str, Any], table: int, *, manual: bool = False,
     """Set up routing, read status, and upsert one net-mode device."""
     setup_routing(dev["iface"], dev["bind_ip"], dev["gateway"], table)
     gw = mgmt_host or _detect_gateway(dev)
-    pub = public_ip(dev["iface"])
+    pub = public_ip(dev["iface"], dev["bind_ip"] if manual else None)
     if model is None:
         vid, pid = _usb_ids(dev["iface"])
         model = _model_label(vid, pid, dev.get("driver"))
-    info = device_status(gw, dev["iface"])  # signal %, operator from device web API
+    # TP-Link Deco has no goform/HiLink API — read operator/signal via its own
+    # local API. Others: bind status calls to the iface only for auto USB dongles
+    # (shared IPs); manual LAN routers have a unique IP reached via the main table.
+    if "deco" in (model or "").lower():
+        info = _status_deco(gw)
+    else:
+        info = device_status(gw, None if manual else dev["iface"])
     # Online if it has a public IP OR the device reports signal/operator
     # (public_ip can transiently time out on a shared subnet).
     status = "online" if (pub or info.get("signal") or info.get("operator")) else "offline"
@@ -399,13 +413,28 @@ def rotate(modem: dict[str, Any]) -> str | None:
     if "deco" in (modem.get("model") or "").lower():
         return _rotate_deco(host, iface)
 
-    ok = _rotate_zte(host, iface) or _rotate_huawei(host, iface)
+    # Interface-bind the web-API calls ONLY for auto-discovered USB dongles,
+    # which can share a gateway IP (two ZTE sticks at 192.168.0.1) and each sit
+    # on their own link. Manually-added LAN routers (MC801A) have a unique IP
+    # reachable via the main table; SO_BINDTODEVICE onto their macvlan is both
+    # unnecessary and flaky (same subnet as the parent), so don't bind.
+    api_iface = None if modem.get("manual") else iface
+    ok = _rotate_zte(host, api_iface) or _rotate_huawei(host, api_iface)
     if not ok:
         raise NetdevError(f"no supported web API at {host} for {iface}")
 
+    # Egress-bind by source IP for manual LAN routers (reliable on a same-subnet
+    # macvlan), by interface for USB dongles. Poll while the link re-registers so
+    # the caller gets the new IP on the first try (no needless rotation retries).
+    bind = modem.get("bind_ip") if modem.get("manual") else None
     import time
-    time.sleep(8)  # let the link re-dial
-    return public_ip(iface)
+    ip = None
+    for _ in range(12):          # up to ~36s for re-attach
+        time.sleep(3)
+        ip = public_ip(iface, bind)
+        if ip:
+            break
+    return ip
 
 
 DECO_PASSWORD_FILE = "/etc/modemproxy/deco5g.pass"
@@ -423,6 +452,34 @@ def _deco_password() -> str | None:
         return Path(DECO_PASSWORD_FILE).read_text().strip() or None
     except OSError:
         return None
+
+
+def _status_deco(host: str) -> dict[str, Any]:
+    """Operator + signal for a TP-Link Deco via its local API (no goform/HiLink)."""
+    try:
+        from tplinkrouterc6u.client.deco import TPLinkDecoClient
+    except ImportError:
+        return {}
+    pw = _deco_password()
+    if not pw:
+        return {}
+    try:
+        c = TPLinkDecoClient(host, pw, verify_ssl=False, timeout=15)
+        c.authorize()
+        s = c.get_lte_status()
+    except Exception:
+        return {}
+    out: dict[str, Any] = {}
+    isp = getattr(s, "isp_name", None)
+    if isp:
+        out["operator"] = isp
+    lvl = getattr(s, "sig_level", None)          # 0-5 bars
+    if lvl not in (None, ""):
+        try:
+            out["signal"] = int(round(int(lvl) / 5 * 100))
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def _rotate_deco(host: str, iface: str) -> str | None:
@@ -478,31 +535,73 @@ def _zte_login(host: str, iface: str | None, cj: str) -> None:
         except ValueError:
             ld = ""
     if ld:
+        # Newer CPE (MC801A): SHA256 challenge, password only.
         h1 = hashlib.sha256(pw.encode()).hexdigest().upper()
         pwd = hashlib.sha256((h1 + ld).encode()).hexdigest().upper()
+        data = {"isTest": "false", "goformId": "LOGIN", "password": pwd}
     else:
-        pwd = base64.b64encode(pw.encode()).decode()
+        # Older MF-series dongles: base64 username + password.
+        data = {"isTest": "false", "goformId": "LOGIN",
+                "username": base64.b64encode(b"admin").decode(),
+                "password": base64.b64encode(pw.encode()).decode()}
     _http(iface, f"{base}/goform_set_cmd_process", method="POST",
-          data={"isTest": "false", "goformId": "LOGIN", "password": pwd},
-          headers=headers, cookies=cj)
+          data=data, headers=headers, cookies=cj)
+
+
+def _zte_get(host: str, iface: str | None, cj: str,
+             headers: dict[str, str], cmd: str) -> dict[str, Any]:
+    """One ZTE goform get-command -> parsed JSON dict (empty on failure)."""
+    ok, text = _http(iface, f"http://{host}/goform/goform_get_cmd_process"
+                     f"?isTest=false&cmd={cmd}", headers=headers, cookies=cj)
+    if not ok or not text:
+        return {}
+    try:
+        return json.loads(text)
+    except ValueError:
+        return {}
 
 
 def _rotate_zte(host: str, iface: str | None = None) -> bool:
-    """ZTE goform: disconnect then connect the data network (authed)."""
-    base = f"http://{host}/goform/goform_set_cmd_process"
+    """ZTE goform rotation.
+
+    Newer CPE (e.g. MC801A) reject every set-command that lacks an ``AD``
+    anti-CSRF token — ``AD = MD5( MD5(wa_inner_version + cr_version) + RD )`` with
+    a fresh ``RD`` nonce per request — and rotate reliably via a bearer-preference
+    toggle (drop to 3G, back to 4G/5G) that forces a full re-registration. Older
+    MF-series dongles just need DISCONNECT/CONNECT and have no AD. We do the full
+    sequence best-effort, so both families work.
+    """
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    base = f"http://{host}/goform/goform_set_cmd_process"
     cj = tempfile.mktemp(prefix="mp_zte_")
+    import time
     try:
         _zte_login(host, iface, cj)
-        ok, _ = _http(iface, base, method="POST", headers=headers, cookies=cj,
-                      data={"isTest": "false", "goformId": "DISCONNECT_NETWORK"})
-        if not ok:
-            return False
-        import time
-        time.sleep(2)
-        _http(iface, base, method="POST", headers=headers, cookies=cj,
-              data={"isTest": "false", "goformId": "CONNECT_NETWORK"})
-        return True
+        wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
+        cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
+        base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+
+        def _set(**params: str) -> bool:
+            data = {"isTest": "false", **params}
+            rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+            if rd and base_hash:
+                data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+            ok, r = _http(iface, base, method="POST", headers=headers,
+                          cookies=cj, data=data)
+            return ok and "failure" not in r.lower()
+
+        ok1 = _set(notCallback="true", goformId="DISCONNECT_NETWORK")
+        # Toggle RAT to force a fresh attach: drop to 3G, then restore auto.
+        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="Only_WCDMA")
+        time.sleep(1)
+        # Restore value differs by firmware — NETWORK_auto (MF-series dongles),
+        # 4G_AND_5G (MC801A 5G CPE). The unsupported one returns "failure" and is
+        # ignored, so the right one wins and neither family is left stuck on 3G.
+        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="NETWORK_auto")
+        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="4G_AND_5G")
+        time.sleep(1)
+        ok2 = _set(notCallback="true", goformId="CONNECT_NETWORK")
+        return ok1 or ok2
     finally:
         try:
             os.unlink(cj)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import subprocess
 from pathlib import Path
@@ -32,14 +33,43 @@ def _modem_index(imei: str) -> int:
     return modems.index(imei) + 1 if imei in modems else len(modems) + 1
 
 
+def _svc(imei: str) -> str:
+    """Stable, filesystem/systemd-safe id for a modem's proxy (its config file
+    name and systemd instance). Derived from the imei, NOT the display name, so
+    renaming a modem never orphans or breaks its running proxy."""
+    slug = re.sub(r"[^A-Za-z0-9]", "", imei)
+    return slug or imei[-6:]
+
+
 def allocate_port(imei: str, *, username: str | None = None,
                   password: str | None = None, auth: bool = True) -> dict:
     """Create/refresh the port record for a modem and pick free ports."""
     cfg = get_config()
     existing = db.get_port(imei)
+    http_port = (existing or {}).get("http_port")
+    socks_port = (existing or {}).get("socks_port")
+    if not http_port or not socks_port:
+        # Ports already handed to OTHER modems — the positional index alone can
+        # collide (indices shift as modems are added/removed), so skip taken ports.
+        used_http, used_socks = set(), set()
+        for m in db.list_modems():
+            if m["imei"] == imei:
+                continue
+            p = db.get_port(m["imei"])
+            if p and p.get("http_port"):
+                used_http.add(p["http_port"])
+            if p and p.get("socks_port"):
+                used_socks.add(p["socks_port"])
+        idx = _modem_index(imei)
+        h = cfg.http_port_base + idx
+        while h in used_http:
+            h += 1
+        s = cfg.socks_port_base + idx
+        while s in used_socks:
+            s += 1
+        http_port = http_port or h
+        socks_port = socks_port or s
     idx = _modem_index(imei)
-    http_port = (existing or {}).get("http_port") or cfg.http_port_base + idx
-    socks_port = (existing or {}).get("socks_port") or cfg.socks_port_base + idx
     if auth:
         username = username or (existing or {}).get("username") or f"u{idx}"
         password = password or (existing or {}).get("password") or secrets.token_hex(8)
@@ -65,6 +95,7 @@ def render_modem(imei: str) -> Path:
     text = _env.get_template("3proxy.cfg.j2").render(
         imei=imei,
         name=name,
+        svc=_svc(imei),
         dns=dns,
         username=port.get("username"),
         password=port.get("password"),
@@ -77,7 +108,7 @@ def render_modem(imei: str) -> Path:
         white_list=",".join(white_list) if white_list else "",
     )
     AUTOGEN_DIR.mkdir(parents=True, exist_ok=True)
-    out = AUTOGEN_DIR / f"3proxy.{name}.cfg"
+    out = AUTOGEN_DIR / f"3proxy.{_svc(imei)}.cfg"
     out.write_text(text)
     return out
 
@@ -115,13 +146,12 @@ def set_whitelist(imei: str, ips: list[str]) -> dict:
 
 
 def purge_port(imei: str) -> None:
-    modem = db.get_modem(imei) or {}
-    name = modem.get("name") or imei[-6:]
+    svc = _svc(imei)
     db.delete_port(imei)
-    cfg_file = AUTOGEN_DIR / f"3proxy.{name}.cfg"
+    cfg_file = AUTOGEN_DIR / f"3proxy.{svc}.cfg"
     cfg_file.unlink(missing_ok=True)
-    _systemctl("stop", f"modemproxy-proxy@{name}.service")
-    _systemctl("disable", f"modemproxy-proxy@{name}.service")
+    _systemctl("stop", f"modemproxy-proxy@{svc}.service")
+    _systemctl("disable", f"modemproxy-proxy@{svc}.service")
     _publish_sync()
 
 
@@ -147,19 +177,17 @@ def apply_port(imei: str, **alloc_kwargs) -> dict:
             ttl.ensure_ttl(modem["iface"])
         except Exception:
             pass
-    name = modem.get("name") or imei[-6:]
-    _systemctl("enable", f"modemproxy-proxy@{name}.service")
-    _systemctl("restart", f"modemproxy-proxy@{name}.service")
+    svc = _svc(imei)
+    _systemctl("enable", f"modemproxy-proxy@{svc}.service")
+    _systemctl("restart", f"modemproxy-proxy@{svc}.service")
     _publish_sync()
     return port
 
 
 def stop_proxy(imei: str, *, locked: bool = False) -> None:
     """Stop a modem's proxy without deleting its config/credentials."""
-    modem = db.get_modem(imei) or {}
-    name = modem.get("name") or imei[-6:]
     db.set_port(imei, enabled=0, quota_locked=1 if locked else 0)
-    _systemctl("stop", f"modemproxy-proxy@{name}.service")
+    _systemctl("stop", f"modemproxy-proxy@{_svc(imei)}.service")
     _publish_sync()
 
 

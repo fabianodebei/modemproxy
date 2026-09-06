@@ -128,6 +128,23 @@
             <button @click="selected=null" class="text-slate-500 hover:text-slate-200">✕</button>
           </div>
 
+          <!-- rename -->
+          <div class="flex gap-2">
+            <input x-model="newName" type="text" :placeholder="selected.name || 'modem name'"
+                   class="flex-1 bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm">
+            <button @click="setName(selected)" :disabled="busy||!newName"
+                    class="px-3 py-2 rounded-lg bg-ink-600 hover:bg-ink-500 disabled:opacity-40 text-white text-sm">Rename</button>
+          </div>
+
+          <!-- online / offline toggle -->
+          <template x-if="selected.http_port">
+            <button @click="selected.enabled ? disableModem(selected) : apply(selected)" :disabled="busy"
+                    :class="selected.enabled ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-600 hover:bg-slate-500'"
+                    class="w-full px-3 py-2.5 rounded-lg text-white text-sm font-medium disabled:opacity-40">
+              <span x-text="selected.enabled ? '● Online — metti Offline' : '○ Offline — metti Online'"></span>
+            </button>
+          </template>
+
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Operator</p><p x-text="selected.operator||'—'"></p></div>
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Public IP</p><p class="font-mono" x-text="selected.ip||'—'"></p></div>
@@ -309,7 +326,7 @@ const SERVER_HOST = {{ (cfg.bind_address if cfg.bind_address != '0.0.0.0' else r
 function dashboard(){
   return {
     modems: {{ modems | tojson }},
-    selected:null, busy:false, toast:'', newPw:'', newInterval:0, newWl:'',
+    selected:null, busy:false, toast:'', newPw:'', newName:'', newInterval:0, newWl:'',
     ussdCode:'', ussdResp:'', testResult:null, speedResult:null,
     newQuotaMB:0, newQuotaDir:'both',
     init(){},
@@ -327,17 +344,19 @@ function dashboard(){
     async refresh(){ this.modems=await this.api('GET','/api/modems');
       if(this.selected){ this.selected=this.modems.find(m=>m.imei===this.selected.imei)||null; } },
     async discover(){ await this.api('POST','/api/discover'); await this.refresh(); this.notify('Discovery complete'); },
-    open(m){ this.selected=m; this.newPw='';
+    open(m){ this.selected=m; this.newPw=''; this.newName='';
       this.newInterval=m.rotation_interval||0;
       this.newWl=(JSON.parse(m.white_list||'[]')).join('\n');
       this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null;
       this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both'; },
     hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
     async rotate(m){ const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
-    async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); await this.refresh(); this.notify('Proxy enabled'); },
+    async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); if(this.selected&&this.selected.imei===m.imei){this.selected.enabled=1;} await this.refresh(); this.notify('Online'); },
+    async disableModem(m){ await this.api('POST',`/api/modems/${m.imei}/disable`); if(this.selected&&this.selected.imei===m.imei){this.selected.enabled=0;} await this.refresh(); this.notify('Offline'); },
     async purge(m){ await this.api('DELETE',`/api/modems/${m.imei}/port`); await this.refresh(); this.notify('Proxy disabled'); },
     async reset(m){ await this.api('POST',`/api/modems/${m.imei}/reset`); this.notify('Reset sent'); },
     async setPassword(m){ await this.api('POST',`/api/modems/${m.imei}/password`,{password:this.newPw}); this.newPw=''; await this.refresh(); this.notify('Password updated'); },
+    async setName(m){ const n=this.newName; await this.api('POST',`/api/modems/${m.imei}/name`,{name:n}); this.newName=''; await this.refresh(); if(this.selected){this.selected.name=n;} this.notify('Renamed'); },
     async regenerate(m){ await this.api('POST',`/api/modems/${m.imei}/regenerate`); await this.refresh(); this.notify('Credentials regenerated'); },
     async setInterval(m){ await this.api('POST',`/api/modems/${m.imei}/rotation-interval`,{seconds:this.newInterval}); await this.refresh(); this.notify(this.newInterval>0?`Auto-rotate every ${this.newInterval}s`:'Auto-rotate off'); },
     async setWhitelist(m){ const ips=this.newWl.split('\n').map(s=>s.trim()).filter(Boolean); await this.api('POST',`/api/modems/${m.imei}/whitelist`,{ips}); await this.refresh(); this.notify(ips.length?`Whitelist: ${ips.length} IP(s)`:'Whitelist cleared'); },
