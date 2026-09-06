@@ -186,9 +186,13 @@ def _refresh_dev(dev: dict[str, Any], table: int, *, manual: bool = False,
     if model is None:
         vid, pid = _usb_ids(dev["iface"])
         model = _model_label(vid, pid, dev.get("driver"))
-    # Bind status calls to the iface only for auto USB dongles (shared IPs);
-    # manual LAN routers have a unique IP reached via the main table.
-    info = device_status(gw, None if manual else dev["iface"])
+    # TP-Link Deco has no goform/HiLink API — read operator/signal via its own
+    # local API. Others: bind status calls to the iface only for auto USB dongles
+    # (shared IPs); manual LAN routers have a unique IP reached via the main table.
+    if "deco" in (model or "").lower():
+        info = _status_deco(gw)
+    else:
+        info = device_status(gw, None if manual else dev["iface"])
     # Online if it has a public IP OR the device reports signal/operator
     # (public_ip can transiently time out on a shared subnet).
     status = "online" if (pub or info.get("signal") or info.get("operator")) else "offline"
@@ -448,6 +452,34 @@ def _deco_password() -> str | None:
         return Path(DECO_PASSWORD_FILE).read_text().strip() or None
     except OSError:
         return None
+
+
+def _status_deco(host: str) -> dict[str, Any]:
+    """Operator + signal for a TP-Link Deco via its local API (no goform/HiLink)."""
+    try:
+        from tplinkrouterc6u.client.deco import TPLinkDecoClient
+    except ImportError:
+        return {}
+    pw = _deco_password()
+    if not pw:
+        return {}
+    try:
+        c = TPLinkDecoClient(host, pw, verify_ssl=False, timeout=15)
+        c.authorize()
+        s = c.get_lte_status()
+    except Exception:
+        return {}
+    out: dict[str, Any] = {}
+    isp = getattr(s, "isp_name", None)
+    if isp:
+        out["operator"] = isp
+    lvl = getattr(s, "sig_level", None)          # 0-5 bars
+    if lvl not in (None, ""):
+        try:
+            out["signal"] = int(round(int(lvl) / 5 * 100))
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def _rotate_deco(host: str, iface: str) -> str | None:
