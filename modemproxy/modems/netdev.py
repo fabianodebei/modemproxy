@@ -486,13 +486,17 @@ def _zte_login(host: str, iface: str | None, cj: str) -> None:
         except ValueError:
             ld = ""
     if ld:
+        # Newer CPE (MC801A): SHA256 challenge, password only.
         h1 = hashlib.sha256(pw.encode()).hexdigest().upper()
         pwd = hashlib.sha256((h1 + ld).encode()).hexdigest().upper()
+        data = {"isTest": "false", "goformId": "LOGIN", "password": pwd}
     else:
-        pwd = base64.b64encode(pw.encode()).decode()
+        # Older MF-series dongles: base64 username + password.
+        data = {"isTest": "false", "goformId": "LOGIN",
+                "username": base64.b64encode(b"admin").decode(),
+                "password": base64.b64encode(pw.encode()).decode()}
     _http(iface, f"{base}/goform_set_cmd_process", method="POST",
-          data={"isTest": "false", "goformId": "LOGIN", "password": pwd},
-          headers=headers, cookies=cj)
+          data=data, headers=headers, cookies=cj)
 
 
 def _zte_get(host: str, iface: str | None, cj: str,
@@ -538,9 +542,13 @@ def _rotate_zte(host: str, iface: str | None = None) -> bool:
             return ok and "failure" not in r.lower()
 
         ok1 = _set(notCallback="true", goformId="DISCONNECT_NETWORK")
-        # CPE: toggle RAT to force a fresh attach (best-effort, no-op on dongles).
+        # Toggle RAT to force a fresh attach: drop to 3G, then restore auto.
         _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="Only_WCDMA")
         time.sleep(1)
+        # Restore value differs by firmware — NETWORK_auto (MF-series dongles),
+        # 4G_AND_5G (MC801A 5G CPE). The unsupported one returns "failure" and is
+        # ignored, so the right one wins and neither family is left stuck on 3G.
+        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="NETWORK_auto")
         _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="4G_AND_5G")
         time.sleep(1)
         ok2 = _set(notCallback="true", goformId="CONNECT_NETWORK")
