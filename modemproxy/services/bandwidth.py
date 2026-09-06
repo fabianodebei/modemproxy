@@ -11,6 +11,8 @@ ignoring negative deltas (a reset boundary).
 from __future__ import annotations
 
 import datetime as dt
+import re
+import subprocess
 from pathlib import Path
 
 from .. import db
@@ -26,20 +28,80 @@ def _read_iface_counters(iface: str) -> tuple[int, int] | None:
         return None
 
 
+# --- per-source-IP byte counters (iptables) -------------------------------
+# A macvlan sub-interface (LAN 5G routers) does NOT account the egress traffic
+# on its own /sys counters — the kernel counts it on the physical parent — so
+# per-iface stats read ~0 for those modems. Count by the modem's bind IP with a
+# plain (target-less) iptables rule instead: it works for every net-mode modem,
+# macvlan or real dongle, since each has a unique source IP.
+
+def _sh(args: list[str]) -> subprocess.CompletedProcess | None:
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _bw_tag(imei: str) -> str:
+    return "mpbw_" + re.sub(r"[^A-Za-z0-9]", "", imei)
+
+
+def _ensure_bw_rules(imei: str, bind_ip: str) -> None:
+    tag = _bw_tag(imei)
+    for chain, sel in (("OUTPUT", "-s"), ("INPUT", "-d")):
+        rule = [chain, sel, bind_ip, "-m", "comment", "--comment", tag]
+        chk = _sh(["iptables", "-w", "-C", *rule])
+        if chk is None or chk.returncode != 0:
+            _sh(["iptables", "-w", "-A", *rule])
+
+
+def _read_bw_counters(imei: str) -> tuple[int, int] | None:
+    """(rx, tx) bytes from the modem's iptables byte counters, or None."""
+    tag = _bw_tag(imei)
+
+    def _bytes(chain: str) -> int | None:
+        r = _sh(["iptables", "-w", "-nvxL", chain])
+        if r is None or r.returncode != 0:
+            return None
+        for line in r.stdout.splitlines():
+            if tag in line:
+                parts = line.split()
+                try:
+                    return int(parts[1])          # cols: pkts bytes target ...
+                except (IndexError, ValueError):
+                    return None
+        return None
+
+    tx = _bytes("OUTPUT")
+    rx = _bytes("INPUT")
+    if rx is None and tx is None:
+        return None
+    return rx or 0, tx or 0
+
+
 def sample() -> int:
-    """Record one counter sample per known modem interface. Returns count."""
+    """Record one counter sample per known modem. Returns count."""
     n = 0
     with db.db() as conn:
-        for m in conn.execute("SELECT imei, iface FROM modems WHERE iface IS NOT NULL"):
+        rows = conn.execute(
+            "SELECT imei, iface, bind_ip FROM modems WHERE iface IS NOT NULL"
+        ).fetchall()
+    for m in rows:
+        counters = None
+        if m["bind_ip"]:
+            _ensure_bw_rules(m["imei"], m["bind_ip"])
+            counters = _read_bw_counters(m["imei"])
+        if not counters:                          # fallback: real-iface stats
             counters = _read_iface_counters(m["iface"])
-            if not counters:
-                continue
-            rx, tx = counters
+        if not counters:
+            continue
+        rx, tx = counters
+        with db.db() as conn:
             conn.execute(
                 "INSERT INTO bandwidth (imei, ts, rx_bytes, tx_bytes) VALUES (?,?,?,?)",
                 (m["imei"], db.now(), rx, tx),
             )
-            n += 1
+        n += 1
     return n
 
 
