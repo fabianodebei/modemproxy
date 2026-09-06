@@ -24,7 +24,7 @@
     <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
       <p class="text-xs text-slate-400">Online</p>
       <p class="text-2xl font-semibold mt-1 text-emerald-400"
-         x-text="modems.filter(m=>m.status==='online').length"></p>
+         x-text="modems.filter(m=>effStatus(m)==='online').length"></p>
     </div>
     <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
       <p class="text-xs text-slate-400">Active proxies</p>
@@ -81,12 +81,12 @@
             <td class="px-5 py-3">
               <span class="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full"
                     :class="{
-                      'bg-emerald-500/15 text-emerald-400': m.status==='online',
-                      'bg-red-500/15 text-red-400': m.status==='offline',
-                      'bg-slate-500/15 text-slate-400': m.status!=='online'&&m.status!=='offline'}">
+                      'bg-emerald-500/15 text-emerald-400': effStatus(m)==='online',
+                      'bg-red-500/15 text-red-400': effStatus(m)==='offline',
+                      'bg-slate-500/15 text-slate-400': effStatus(m)!=='online'&&effStatus(m)!=='offline'}">
                 <span class="h-1.5 w-1.5 rounded-full"
-                      :class="m.status==='online'?'bg-emerald-400':m.status==='offline'?'bg-red-400':'bg-slate-400'"></span>
-                <span x-text="m.status"></span>
+                      :class="effStatus(m)==='online'?'bg-emerald-400':effStatus(m)==='offline'?'bg-red-400':'bg-slate-400'"></span>
+                <span x-text="(m.http_port && !m.enabled) ? 'off' : m.status"></span>
               </span>
               <template x-if="m.quota_locked">
                 <span class="ml-1 inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-amber-500/15 text-amber-400" title="Over monthly quota">🔒 quota</span>
@@ -344,6 +344,7 @@ function dashboard(){
     async refresh(){ this.modems=await this.api('GET','/api/modems');
       if(this.selected){ this.selected=this.modems.find(m=>m.imei===this.selected.imei)||null; } },
     async discover(){ await this.api('POST','/api/discover'); await this.refresh(); this.notify('Discovery complete'); },
+    effStatus(m){ return (m.http_port && !m.enabled) ? 'offline' : (m.status||'—'); },
     open(m){ this.selected=m; this.newPw=''; this.newName='';
       this.newInterval=m.rotation_interval||0;
       this.newWl=(JSON.parse(m.white_list||'[]')).join('\n');

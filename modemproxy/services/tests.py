@@ -1,8 +1,9 @@
 """Per-modem connectivity + speed tests.
 
 Traffic is forced through a specific modem by binding curl to that modem's
-network interface (`curl --interface <iface>`), so the test reflects that SIM's
-egress regardless of the host default route.
+*source IP* (`curl --interface <bind_ip>`) so it follows the modem's policy
+route. Binding by the source address (not the interface name) is reliable even
+for LAN routers on a same-subnet macvlan, where SO_BINDTODEVICE is flaky.
 """
 from __future__ import annotations
 
@@ -16,16 +17,19 @@ IP_ECHO_URL = "https://api.ipify.org"
 SPEEDTEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000"
 
 
-def _iface(imei: str) -> str:
+def _binder(imei: str) -> str:
+    """The curl --interface value for this modem: its source IP (preferred, works
+    on macvlans) or, failing that, its interface name."""
     m = db.get_modem(imei)
-    if not m or not m.get("iface"):
-        raise ValueError(f"no interface known for {imei} (run discover)")
-    return m["iface"]
+    binder = (m or {}).get("bind_ip") or (m or {}).get("iface")
+    if not binder:
+        raise ValueError(f"no interface/IP known for {imei} (run discover)")
+    return binder
 
 
 def conn_test(imei: str, timeout: int = 15) -> dict:
     """Fetch the public IP seen when egressing through this modem."""
-    iface = _iface(imei)
+    iface = _binder(imei)
     t0 = time.time()
     try:
         out = subprocess.run(
@@ -45,7 +49,7 @@ def conn_test(imei: str, timeout: int = 15) -> dict:
 
 def speedtest(imei: str, timeout: int = 30) -> dict:
     """Measure download throughput through this modem (Mbps)."""
-    iface = _iface(imei)
+    iface = _binder(imei)
     try:
         out = subprocess.run(
             ["curl", "-s", "-o", "/dev/null", "--max-time", str(timeout),
