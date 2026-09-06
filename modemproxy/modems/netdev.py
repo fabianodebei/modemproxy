@@ -487,22 +487,56 @@ def _zte_login(host: str, iface: str | None, cj: str) -> None:
           headers=headers, cookies=cj)
 
 
+def _zte_get(host: str, iface: str | None, cj: str,
+             headers: dict[str, str], cmd: str) -> dict[str, Any]:
+    """One ZTE goform get-command -> parsed JSON dict (empty on failure)."""
+    ok, text = _http(iface, f"http://{host}/goform/goform_get_cmd_process"
+                     f"?isTest=false&cmd={cmd}", headers=headers, cookies=cj)
+    if not ok or not text:
+        return {}
+    try:
+        return json.loads(text)
+    except ValueError:
+        return {}
+
+
 def _rotate_zte(host: str, iface: str | None = None) -> bool:
-    """ZTE goform: disconnect then connect the data network (authed)."""
-    base = f"http://{host}/goform/goform_set_cmd_process"
+    """ZTE goform rotation.
+
+    Newer CPE (e.g. MC801A) reject every set-command that lacks an ``AD``
+    anti-CSRF token — ``AD = MD5( MD5(wa_inner_version + cr_version) + RD )`` with
+    a fresh ``RD`` nonce per request — and rotate reliably via a bearer-preference
+    toggle (drop to 3G, back to 4G/5G) that forces a full re-registration. Older
+    MF-series dongles just need DISCONNECT/CONNECT and have no AD. We do the full
+    sequence best-effort, so both families work.
+    """
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    base = f"http://{host}/goform/goform_set_cmd_process"
     cj = tempfile.mktemp(prefix="mp_zte_")
+    import time
     try:
         _zte_login(host, iface, cj)
-        ok, _ = _http(iface, base, method="POST", headers=headers, cookies=cj,
-                      data={"isTest": "false", "goformId": "DISCONNECT_NETWORK"})
-        if not ok:
-            return False
-        import time
-        time.sleep(2)
-        _http(iface, base, method="POST", headers=headers, cookies=cj,
-              data={"isTest": "false", "goformId": "CONNECT_NETWORK"})
-        return True
+        wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
+        cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
+        base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+
+        def _set(**params: str) -> bool:
+            data = {"isTest": "false", **params}
+            rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+            if rd and base_hash:
+                data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+            ok, r = _http(iface, base, method="POST", headers=headers,
+                          cookies=cj, data=data)
+            return ok and "failure" not in r.lower()
+
+        ok1 = _set(notCallback="true", goformId="DISCONNECT_NETWORK")
+        # CPE: toggle RAT to force a fresh attach (best-effort, no-op on dongles).
+        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="Only_WCDMA")
+        time.sleep(1)
+        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="4G_AND_5G")
+        time.sleep(1)
+        ok2 = _set(notCallback="true", goformId="CONNECT_NETWORK")
+        return ok1 or ok2
     finally:
         try:
             os.unlink(cj)
