@@ -134,10 +134,18 @@ def _prefix(entry: dict[str, Any], ipv4: str) -> int:
     return 24
 
 
-def public_ip(iface: str) -> str | None:
-    """Public WAN IP as seen through a specific interface."""
+def public_ip(iface: str, bind: str | None = None) -> str | None:
+    """Public WAN IP as seen through a modem.
+
+    ``bind`` (a source IP) is used when given: curl's ``--interface`` accepts an
+    address and binds the source, which is reliable for macvlan LAN routers whose
+    subnet overlaps the parent (SO_BINDTODEVICE onto them is flaky). Without it we
+    bind to the interface by name — needed for USB dongles that share a source IP
+    but sit on their own link.
+    """
+    binder = bind or iface
     for url in ("https://api.ipify.org", "http://ifconfig.me/ip"):
-        rc, out, _ = _run(["curl", "-s", "--max-time", "12", "--interface", iface, url], timeout=15)
+        rc, out, _ = _run(["curl", "-s", "--max-time", "12", "--interface", binder, url], timeout=15)
         ip = out.strip()
         if rc == 0 and ip and len(ip) <= 45 and ip.count(".") == 3:
             return ip
@@ -174,7 +182,7 @@ def _refresh_dev(dev: dict[str, Any], table: int, *, manual: bool = False,
     """Set up routing, read status, and upsert one net-mode device."""
     setup_routing(dev["iface"], dev["bind_ip"], dev["gateway"], table)
     gw = mgmt_host or _detect_gateway(dev)
-    pub = public_ip(dev["iface"])
+    pub = public_ip(dev["iface"], dev["bind_ip"] if manual else None)
     if model is None:
         vid, pid = _usb_ids(dev["iface"])
         model = _model_label(vid, pid, dev.get("driver"))
@@ -411,9 +419,18 @@ def rotate(modem: dict[str, Any]) -> str | None:
     if not ok:
         raise NetdevError(f"no supported web API at {host} for {iface}")
 
+    # Egress-bind by source IP for manual LAN routers (reliable on a same-subnet
+    # macvlan), by interface for USB dongles. Poll while the link re-registers so
+    # the caller gets the new IP on the first try (no needless rotation retries).
+    bind = modem.get("bind_ip") if modem.get("manual") else None
     import time
-    time.sleep(8)  # let the link re-dial
-    return public_ip(iface)
+    ip = None
+    for _ in range(12):          # up to ~36s for re-attach
+        time.sleep(3)
+        ip = public_ip(iface, bind)
+        if ip:
+            break
+    return ip
 
 
 DECO_PASSWORD_FILE = "/etc/modemproxy/deco5g.pass"

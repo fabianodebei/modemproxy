@@ -60,7 +60,7 @@ def test_discover_upserts_netdev_modem(monkeypatch):
     }])
     monkeypatch.setattr(netdev, "setup_routing", lambda *a, **k: None)
     monkeypatch.setattr(netdev, "_detect_gateway", lambda d: "192.168.0.1")
-    monkeypatch.setattr(netdev, "public_ip", lambda i: "5.6.7.8")
+    monkeypatch.setattr(netdev, "public_ip", lambda i, bind=None: "5.6.7.8")
     monkeypatch.setattr(netdev, "_usb_ids", lambda i: ("19d2", "1405"))
 
     out = netdev.discover()
@@ -98,7 +98,7 @@ def test_status_zte_parses_signal_and_operator(monkeypatch):
 def test_register_manual_lan_router(monkeypatch):
     monkeypatch.setattr(netdev, "_iface_ipv4", lambda i: "192.168.0.50")
     monkeypatch.setattr(netdev, "setup_routing", lambda *a, **k: None)
-    monkeypatch.setattr(netdev, "public_ip", lambda i: "88.1.2.3")
+    monkeypatch.setattr(netdev, "public_ip", lambda i, bind=None: "88.1.2.3")
     monkeypatch.setattr(netdev, "device_status",
                         lambda h, i=None: {"signal": 80, "operator": "WINDTRE"})
 
@@ -127,7 +127,7 @@ def test_discover_refreshes_manual_router(monkeypatch):
     monkeypatch.setattr(netdev, "list_netdevs", lambda: [])
     monkeypatch.setattr(netdev, "_iface_ipv4", lambda i: "192.168.0.50")
     monkeypatch.setattr(netdev, "setup_routing", lambda *a, **k: None)
-    monkeypatch.setattr(netdev, "public_ip", lambda i: "88.1.2.3")
+    monkeypatch.setattr(netdev, "public_ip", lambda i, bind=None: "88.1.2.3")
     monkeypatch.setattr(netdev, "device_status", lambda h, i=None: {"signal": 60})
 
     out = netdev.discover()
@@ -146,7 +146,7 @@ def test_rotate_netdev_uses_web_api(monkeypatch):
     from modemproxy.modems import manager
     monkeypatch.setattr(netdev, "_rotate_zte", lambda host, iface=None: True)
     monkeypatch.setattr(netdev, "_rotate_huawei", lambda host, iface=None: False)
-    monkeypatch.setattr(netdev, "public_ip", lambda i: "9.9.9.9")
+    monkeypatch.setattr(netdev, "public_ip", lambda i, bind=None: "9.9.9.9")
     import modemproxy.modems.netdev as nd
     monkeypatch.setattr(nd, "_rotate_zte", lambda host, iface=None: True)
     monkeypatch.setattr("time.sleep", lambda s: None)
