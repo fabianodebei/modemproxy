@@ -136,6 +136,15 @@
                     class="px-3 py-2 rounded-lg bg-ink-600 hover:bg-ink-500 disabled:opacity-40 text-white text-sm">Rename</button>
           </div>
 
+          <!-- online / offline toggle -->
+          <template x-if="selected.http_port">
+            <button @click="selected.enabled ? disableModem(selected) : apply(selected)" :disabled="busy"
+                    :class="selected.enabled ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-600 hover:bg-slate-500'"
+                    class="w-full px-3 py-2.5 rounded-lg text-white text-sm font-medium disabled:opacity-40">
+              <span x-text="selected.enabled ? '● Online — metti Offline' : '○ Offline — metti Online'"></span>
+            </button>
+          </template>
+
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Operator</p><p x-text="selected.operator||'—'"></p></div>
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Public IP</p><p class="font-mono" x-text="selected.ip||'—'"></p></div>
@@ -342,7 +351,8 @@ function dashboard(){
       this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both'; },
     hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
     async rotate(m){ const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
-    async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); await this.refresh(); this.notify('Proxy enabled'); },
+    async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); if(this.selected&&this.selected.imei===m.imei){this.selected.enabled=1;} await this.refresh(); this.notify('Online'); },
+    async disableModem(m){ await this.api('POST',`/api/modems/${m.imei}/disable`); if(this.selected&&this.selected.imei===m.imei){this.selected.enabled=0;} await this.refresh(); this.notify('Offline'); },
     async purge(m){ await this.api('DELETE',`/api/modems/${m.imei}/port`); await this.refresh(); this.notify('Proxy disabled'); },
     async reset(m){ await this.api('POST',`/api/modems/${m.imei}/reset`); this.notify('Reset sent'); },
     async setPassword(m){ await this.api('POST',`/api/modems/${m.imei}/password`,{password:this.newPw}); this.newPw=''; await this.refresh(); this.notify('Password updated'); },
