@@ -7,7 +7,6 @@ either the session cookie or HTTP basic auth.
 from __future__ import annotations
 
 import base64
-import re
 import secrets
 import subprocess
 from contextlib import asynccontextmanager
@@ -202,27 +201,22 @@ def sms_page(request: Request, user: str = Depends(ui_auth)):
     )
 
 
-@app.get("/router/{imei}")
-def router_root(imei: str, user: str = Depends(ui_auth)):
-    return RedirectResponse(f"/router/{imei}/", status_code=307)
+# --- Router web-UI passthrough ---------------------------------------------
+# The modems' own admin UIs are SPAs that assume they live at the origin root
+# (absolute /goform, /home/index.html, location.pathname checks), so serving
+# them under a /router/<imei>/ prefix breaks them no matter how much we rewrite.
+# Instead we give the router a *virtual root*: entering /router/<imei>/ stores
+# the active router in a cookie and lands on /index.html; a catch-all (last
+# route in this file) forwards every path the panel doesn't own to that router
+# untouched. Only one router can be "open" per browser at a time.
+ROUTER_COOKIE = "mp_router"
 
 
-@app.api_route("/router/{imei}/{path:path}", methods=["GET", "POST"])
-async def router_proxy(imei: str, path: str, request: Request,
-                       user: str = Depends(ui_auth)):
-    """Reverse-proxy a net-mode modem's own web UI so it's reachable through the
-    panel (even remotely). Assets are relative, so injecting a <base> tag makes
-    the whole SPA resolve under /router/{imei}/; absolute redirects to the
-    device IP and Set-Cookie paths are rewritten to stay inside the prefix."""
-    m = db.get_modem(imei)
-    host = m.get("mgmt_host") if m else None
-    if not host:
-        raise HTTPException(404, "modem not found")
+async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
+    host = m["mgmt_host"]
     # Source-IP bind is reliable for every net-mode modem (macvlan or dongle);
     # SO_BINDTODEVICE onto the iface name is flaky, so prefer the bind IP.
     binder = m.get("bind_ip") or m.get("iface")
-    prefix = f"/router/{imei}/"
-
     target = f"http://{host}/{path}"
     if request.url.query:
         target += "?" + request.url.query
@@ -231,7 +225,7 @@ async def router_proxy(imei: str, path: str, request: Request,
         args += ["--interface", binder]
     if ck := request.headers.get("cookie"):
         args += ["-H", f"Cookie: {ck}"]
-    args += ["-H", f"Referer: http://{host}/"]
+    args += ["-H", f"Referer: http://{host}/", "-H", "X-Requested-With: XMLHttpRequest"]
     body = b""
     if request.method == "POST":
         body = await request.body()
@@ -257,44 +251,26 @@ async def router_proxy(imei: str, path: str, request: Request,
         k, v = k.strip().lower(), v.strip()
         if k == "content-type":
             ctype = v
-        elif k == "location":                       # keep redirects inside the prefix
+        elif k == "location":
+            # Absolute redirects to the device IP -> same path on our origin.
             if v.startswith(f"http://{host}/"):
-                v = prefix + v[len(f"http://{host}/"):]
-            elif v.startswith("/"):
-                v = prefix + v.lstrip("/")
+                v = "/" + v[len(f"http://{host}/"):]
             out_headers["location"] = v
-        elif k == "set-cookie":                      # isolate router cookies to the prefix
-            out_headers["set-cookie"] = re.sub(r";\s*[Pp]ath=[^;]*", "", v) + f"; Path={prefix}"
-    if "text/html" in ctype:
-        html = payload.decode("utf-8", "replace")
-        html = html.replace(f"http://{host}/", prefix)
-        # <base> must match the CURRENT page's directory, not the router root:
-        # some firmwares serve the real UI from a subfolder (home/index.html),
-        # whose relative assets would otherwise resolve one level too high.
-        sub = path.rsplit("/", 1)[0] if "/" in path else ""
-        base_href = prefix + (sub + "/" if sub else "")
-        # <base> fixes relative assets; the shim rewrites absolute-path AJAX
-        # (e.g. /i18n/*.json, /goform/*) that <base> can't touch, so routers
-        # whose JS uses absolute URLs (untranslated {{...}} otherwise) work too.
-        inject = (
-            f'<base href="{base_href}">'
-            '<script>(function(){var P=' + repr(prefix) + ';'
-            'function fix(u){try{if(typeof u==="string"&&u.charAt(0)==="/"'
-            '&&u.substr(0,2)!=="//"&&u.indexOf(P)!==0){return P+u.replace(/^\\/+/,"");}}'
-            'catch(e){}return u;}'
-            'var O=XMLHttpRequest.prototype.open;'
-            'XMLHttpRequest.prototype.open=function(){arguments[1]=fix(arguments[1]);'
-            'return O.apply(this,arguments);};'
-            'if(window.fetch){var F=window.fetch;window.fetch=function(u,o){'
-            'return F.call(this,fix(u),o);};}})();</script>'
-        )
-        if re.search(r"<head[^>]*>", html, re.I):
-            html = re.sub(r"(<head[^>]*>)", r"\1" + inject, html, count=1, flags=re.I)
-        else:
-            html = inject + html
-        payload = html.encode("utf-8")
+        elif k == "set-cookie":
+            out_headers["set-cookie"] = v
     return Response(content=payload, status_code=code, media_type=ctype,
                     headers=out_headers)
+
+
+@app.get("/router/{imei}")
+@app.get("/router/{imei}/")
+def router_enter(imei: str, user: str = Depends(ui_auth)):
+    m = db.get_modem(imei)
+    if not m or not m.get("mgmt_host"):
+        raise HTTPException(404, "modem not found")
+    resp = RedirectResponse("/index.html", status_code=303)
+    resp.set_cookie(ROUTER_COOKIE, imei, path="/", httponly=True, samesite="lax")
+    return resp
 
 
 @app.get("/pool", response_class=HTMLResponse)
@@ -872,3 +848,15 @@ def prometheus_metrics():
 @app.get("/healthz")
 def healthz():
     return JSONResponse({"ok": True})
+
+
+# Must stay the LAST route: forwards any path the panel doesn't own to the
+# router selected via /router/<imei>/ (see ROUTER_COOKIE). Without an active
+# router it's a plain 404, so panel behaviour is unchanged.
+@app.api_route("/{path:path}", methods=["GET", "POST"], include_in_schema=False)
+async def router_catchall(path: str, request: Request, user: str = Depends(ui_auth)):
+    imei = request.cookies.get(ROUTER_COOKIE)
+    m = db.get_modem(imei) if imei else None
+    if not m or not m.get("mgmt_host"):
+        raise HTTPException(404, "not found")
+    return await _forward_to_router(m, path, request)
