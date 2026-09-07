@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import subprocess
@@ -323,6 +324,12 @@ def pool_status() -> dict:
 
 
 def _systemctl(action: str, unit: str) -> None:
+    # Only root drives real units. Tests and dev runs execute as a normal user
+    # and polkit may still let an active-session user enable/start units —
+    # which once left stray modemproxy-proxy@<test-imei> instances running on
+    # the production box. So: no-op unless we are root.
+    if os.geteuid() != 0:
+        return
     try:
         subprocess.run(["systemctl", action, unit], check=False,
                        capture_output=True, text=True)
