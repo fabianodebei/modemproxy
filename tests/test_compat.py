@@ -153,3 +153,17 @@ def test_disabled_api_hides_endpoints(client, auth, monkeypatch):
     cfg = get_config()
     monkeypatch.setattr(cfg, "compat_api_enable", False)
     assert client.get("/apix/show_status_json", auth=auth).status_code == 404
+
+
+def test_reset_refused_for_excluded_modem(client, modem, auth, monkeypatch):
+    from modemproxy.config import update_config
+    from modemproxy.modems import manager
+
+    called = []
+    monkeypatch.setattr(manager, "rotate", lambda imei, reason="manual": called.append(imei) or {})
+    update_config({"rotation_hook_exclude": [modem]})
+    try:
+        r = client.get("/apix/reset_modem_by_imei", params={"IMEI": modem}, auth=auth)
+        assert r.status_code == 403 and called == []
+    finally:
+        update_config({"rotation_hook_exclude": []})

@@ -740,6 +740,8 @@ def rotation_hook(token: str):
     if not port:
         raise HTTPException(404, "invalid token")
     imei = port["imei"]
+    if imei in get_config().rotation_hook_exclude:
+        raise HTTPException(403, "link rotation disabled for this modem")
     box: dict = {}
 
     def run():

@@ -135,3 +135,20 @@ def test_revoked_key_rejected(client):
     key = client.post("/api/keys", headers=AUTH, json={}).json()["key"]
     client.delete(f"/api/keys/{key}", headers=AUTH)
     assert client.get("/api/modems", headers={"X-API-Key": key}).status_code == 401
+
+
+def test_rotation_hook_excluded_modem(client, modem, monkeypatch):
+    from modemproxy import db
+    from modemproxy.config import get_config, update_config
+    from modemproxy.modems import manager
+
+    called = []
+    monkeypatch.setattr(manager, "rotate", lambda imei, reason="manual": called.append(imei) or {})
+    update_config({"rotation_hook_exclude": [modem]})
+    try:
+        token = db.get_port(modem)["rotation_token"]
+        r = client.get(f"/hook/rotate/{token}")
+        assert r.status_code == 403 and called == []
+    finally:
+        update_config({"rotation_hook_exclude": []})
+        assert get_config().rotation_hook_exclude == []

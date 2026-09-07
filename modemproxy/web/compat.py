@@ -252,6 +252,8 @@ def reset_modem_by_imei(IMEI: str | None = None, arg: str | None = None,
                         _: str = Depends(compat_auth)):
     """Rotate the public IP (proxysmart returns at once; so do we)."""
     m = _resolve(IMEI or arg)
+    if m["imei"] in get_config().rotation_hook_exclude:
+        raise HTTPException(403, "rotation disabled for this modem")
     _bg(manager.rotate, m["imei"], "proxybet")
     return _ok()
 

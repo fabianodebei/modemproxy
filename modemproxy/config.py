@@ -109,6 +109,10 @@ class Config:
     rotation_unique: bool = True           # require a different IP than before
     rotation_min_interval: int = 0         # ignore rotate calls within N seconds
     rotation_dirty: bool = False           # skip post-checks (fast, no retry)
+    # Modems (imei) whose customer-triggered rotation is refused: the public
+    # /hook/rotate link and the storefront's reset_modem_by_imei. Use it for
+    # units that rotate by rebooting (TP-Link Deco: minutes of downtime).
+    rotation_hook_exclude: list[str] = field(default_factory=list)
 
     # Modem auto-reboot (failure scoring)
     autoreboot_enable: bool = False
