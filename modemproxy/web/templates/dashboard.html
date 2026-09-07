@@ -323,7 +323,7 @@ function dashboard(){
     ussdCode:'', ussdResp:'', testResult:null, speedResult:null,
     newQuotaMB:0, newQuotaDir:'both',
     throughput:{rx_mbps:0, tx_mbps:0}, bwToday:{day_in:0, day_out:0}, _tpTimer:null, _chart:null,
-    init(){},
+    init(){ this.$watch('selected', v=>{ if(!v && this._chart){ this._chart.destroy(); this._chart=null; } }); },
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
     async api(method,url,body){
       this.busy=true;
@@ -368,12 +368,13 @@ function dashboard(){
     async loadChart(m){
       if(!m||!m.imei) return;
       try{
-        if(this._chart) this._chart.destroy();
         const data=await fetch(`/api/bandwidth/${m.imei}/series?hours=24`).then(r=>r.json());
         const labels=data.map(d=>new Date(d.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
         const rx=data.map(d=>d.rx/1024/1024), tx=data.map(d=>d.tx/1024/1024);
         const el=document.getElementById('drawerChart');
-        if(!el) return;
+        if(!el||!document.body.contains(el)) return;
+        const prev=Chart.getChart(el); if(prev) prev.destroy();
+        if(this._chart){ this._chart.destroy(); this._chart=null; }
         this._chart=new Chart(el,{
           type:'line',
           data:{labels,datasets:[
