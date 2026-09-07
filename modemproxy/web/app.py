@@ -310,6 +310,8 @@ def settings_page(request: Request, user: str = Depends(ui_auth)):
                 "alert_expiry_days": cfg.alert_expiry_days,
                 "alert_mute_minutes": cfg.alert_mute_minutes}
     advanced = {"default_hilink_password": cfg.default_hilink_password,
+                "deco_password": cfg.deco_password,
+                "deco_pass_file": Path(netdev.DECO_PASSWORD_FILE).exists(),
                 "custom_ttl": cfg.custom_ttl, "rotation_retry": cfg.rotation_retry,
                 "rotation_max_retry": cfg.rotation_max_retry,
                 "rotation_unique": cfg.rotation_unique,
@@ -322,21 +324,30 @@ def settings_page(request: Request, user: str = Depends(ui_auth)):
         custs.append(c)
     all_modems = [{"imei": m["imei"], "name": m.get("name") or m["imei"][-6:]}
                   for m in db.list_modems() if m.get("http_port")]
-    from ..services.tunnel import machine_data, public_key, tunnel_active
-    tunnel = {
-        "machine_data": machine_data(),
-        "public_key": public_key() or "",
-        "active": tunnel_active(),
-        "host": cfg.ssh_tunnel_host,
-        "user": cfg.ssh_tunnel_user,
-        "port": cfg.ssh_tunnel_port,
+    # Read-only snapshot of what actually runs on this box.
+    def _active(unit: str) -> bool:
+        try:
+            return subprocess.run(["systemctl", "is-active", unit], capture_output=True,
+                                  text=True, timeout=5).stdout.strip() == "active"
+        except (OSError, subprocess.SubprocessError):
+            return False
+    modems = db.list_modems()
+    system = {
+        "web_host": cfg.web_host, "web_port": cfg.web_port,
+        "bind_address": cfg.bind_address,
+        "http_port_base": cfg.http_port_base, "socks_port_base": cfg.socks_port_base,
+        "modems": len(modems),
+        "with_proxy": sum(1 for m in modems if m.get("http_port")),
+        "netdevs": _active("modemproxy-netdevs.service"),
+        "timers": {t: _active(f"modemproxy-{t}.timer")
+                   for t in ("bandwidth", "pinger", "quota", "rotator", "expiry")},
     }
     return templates.TemplateResponse(
         request, "settings.html",
         {"user": user, "keys": db.api_key_list(),
          "access": access, "publish": publish.status(),
          "branding": branding, "alerting": alerting, "advanced": advanced,
-         "customers": custs, "all_modems": all_modems, "tunnel": tunnel},
+         "customers": custs, "all_modems": all_modems, "system": system},
     )
 
 
@@ -793,7 +804,7 @@ async def api_settings_update(request: Request, _: str = Depends(admin_auth)):
                "tg_alerts_enable", "tg_bot_token", "tg_chat_id",
                "alert_rotation_ok", "alert_rotation_fail", "alert_proxy_down",
                "alert_expiry", "alert_expiry_days", "alert_mute_minutes",
-               "default_hilink_password", "custom_ttl", "rotation_retry",
+               "default_hilink_password", "deco_password", "custom_ttl", "rotation_retry",
                "rotation_max_retry", "rotation_unique", "rotation_min_interval",
                "rotation_dirty", "autoreboot_enable", "autoreboot_max_score",
                "autoreboot_window", "autoreboot_min_uptime"}

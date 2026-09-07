@@ -4,68 +4,23 @@
 {% block page_title %}Settings{% endblock %}
 
 {% block main %}
-{# ── Remote Support (reverse SSH tunnel) ─────────────────────────────── #}
-<div x-data="tunnelCard()" x-init="init()" class="max-w-2xl mb-6">
+{# ── System: read-only snapshot of what actually runs ─────────────────── #}
+<div class="max-w-2xl mb-6">
   <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
-    <div class="flex items-center justify-between mb-3">
-      <div>
-        <h2 class="text-sm font-medium text-slate-200">Remote Support</h2>
-        <p class="text-xs text-slate-500">Reverse SSH tunnel — lets vendor access this server remotely.</p>
-      </div>
-      <span :class="active ? 'bg-emerald-500/15 text-emerald-300' : 'bg-ink-700 text-slate-500'"
-            class="text-xs px-2 py-0.5 rounded-full" x-text="active ? 'tunnel active' : 'not connected'"></span>
-    </div>
-
-    <div class="mb-3">
-      <p class="text-xs text-slate-400 mb-1">Machine Data</p>
-      <div class="flex items-center gap-2">
-        <code class="flex-1 text-xs font-mono bg-ink-900/60 rounded-lg px-3 py-2 text-slate-300 break-all select-all">{{ tunnel.machine_data }}</code>
-        <button @click="copy('{{ tunnel.machine_data }}')" class="text-brand-400 hover:text-brand-300 text-xs shrink-0">copy</button>
-      </div>
-    </div>
-
-    {% if tunnel.public_key %}
-    <div class="mb-4">
-      <p class="text-xs text-slate-400 mb-1">Public SSH key
-        <span class="text-slate-500">(add to VPS <code>/home/{{ tunnel.user }}/.ssh/authorized_keys</code>)</span>
-      </p>
-      <div class="flex items-start gap-2">
-        <code class="flex-1 text-xs font-mono bg-ink-900/60 rounded-lg px-3 py-2 text-slate-300 break-all leading-relaxed select-all" style="max-height:6rem;overflow-y:auto">{{ tunnel.public_key }}</code>
-        <button @click="copy(`{{ tunnel.public_key }}`)" class="text-brand-400 hover:text-brand-300 text-xs shrink-0 mt-1">copy</button>
-      </div>
-    </div>
-    {% else %}
-    <p class="text-xs text-amber-400 mb-4">SSH key not found — re-run install.sh to generate it.</p>
-    {% endif %}
-
-    <div class="space-y-3">
-      <div class="flex gap-2">
-        <label class="block text-xs text-slate-400 flex-1">VPS host
-          <input x-model="host" placeholder="e.g. vps.example.com"
-                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
-        </label>
-        <label class="block text-xs text-slate-400 w-24">SSH user
-          <input x-model="user"
-                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
-        </label>
-        <label class="block text-xs text-slate-400 w-24">Remote port
-          <input x-model.number="port" type="number"
-                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
-        </label>
-      </div>
-      <p class="text-xs text-slate-500">Vendor connects via:
-        <code x-show="host" x-cloak class="text-slate-300" x-text="`ssh -p ${port} ${user}@${host}  # on VPS: ssh -p ${port} simone@localhost`"></code>
-        <span x-show="!host">configure VPS host above first</span>
-      </p>
-    </div>
-
-    <div class="mt-4 flex items-center gap-3">
-      <button @click="save()" :disabled="busy"
-              class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-4 py-1.5 text-sm">Save & connect</button>
-      <button x-show="host" x-cloak @click="disconnect()" :disabled="busy"
-              class="bg-ink-700 hover:bg-ink-600 text-slate-300 rounded-lg px-3 py-1.5 text-sm">Disconnect</button>
-      <span x-show="msg" x-cloak class="text-xs text-emerald-300" x-text="msg"></span>
-    </div>
+    <h2 class="text-sm font-medium text-slate-200 mb-1">System</h2>
+    <p class="text-xs text-slate-500 mb-4">What is actually running on this box.</p>
+    <dl class="grid grid-cols-[9rem_1fr] gap-y-2 gap-x-4 text-xs">
+      <dt class="text-slate-500">Admin panel</dt>
+      <dd class="font-mono text-slate-300">{{ system.web_host }}:{{ system.web_port }}</dd>
+      <dt class="text-slate-500">Proxies</dt>
+      <dd class="font-mono text-slate-300">bind {{ system.bind_address }} · HTTP {{ system.http_port_base }}+ · SOCKS {{ system.socks_port_base }}+</dd>
+      <dt class="text-slate-500">Modems</dt>
+      <dd class="font-mono text-slate-300">{{ system.with_proxy }} / {{ system.modems }} with proxy</dd>
+      <dt class="text-slate-500">Net-mode setup</dt>
+      <dd class="font-mono {{ 'text-emerald-400' if system.netdevs else 'text-red-400' }}">modemproxy-netdevs {{ 'active' if system.netdevs else 'inactive' }}</dd>
+      <dt class="text-slate-500">Timers</dt>
+      <dd class="font-mono">{% for t, ok in system.timers.items() %}<span class="{{ 'text-emerald-400' if ok else 'text-red-400' }}">{{ t }}</span>{% if not loop.last %}<span class="text-slate-600"> · </span>{% endif %}{% endfor %}</dd>
+    </dl>
   </div>
 </div>
 
@@ -76,14 +31,7 @@
       <p class="text-xs text-slate-500">How customers reach the proxies from outside.</p>
     </div>
 
-    <div class="flex gap-2 mb-4">
-      <button @click="mode='direct'" :class="mode==='direct' ? 'bg-brand-500 text-white' : 'bg-ink-700 text-slate-300'"
-              class="rounded-lg px-3 py-1.5 text-sm">Direct (public IP)</button>
-      <button @click="mode='relay'" :class="mode==='relay' ? 'bg-brand-500 text-white' : 'bg-ink-700 text-slate-300'"
-              class="rounded-lg px-3 py-1.5 text-sm">Relay (behind NAT)</button>
-    </div>
-
-    <div x-show="mode==='direct'" class="space-y-3">
+    <div class="space-y-3">
       <label class="block text-xs text-slate-400">Public IP / hostname
         <input x-model="public_host" placeholder="e.g. 203.0.113.10 or proxy.example.com"
                class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
@@ -91,27 +39,6 @@
       <label class="flex items-center gap-2 text-xs text-slate-400">
         <input type="checkbox" x-model="open_firewall"> auto-open proxy ports in ufw
       </label>
-    </div>
-
-    <div x-show="mode==='relay'" x-cloak class="space-y-3">
-      <label class="block text-xs text-slate-400">Relay VPS host
-        <input x-model="relay_host" placeholder="frps VPS public IP / hostname"
-               class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
-      </label>
-      <div class="flex gap-2">
-        <label class="block text-xs text-slate-400 w-28">Relay port
-          <input x-model.number="relay_port" type="number"
-                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
-        </label>
-        <label class="block text-xs text-slate-400 flex-1">Token
-          <input x-model="relay_token" placeholder="shared with frps"
-                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
-        </label>
-        <label class="block text-xs text-slate-400 w-28">Port offset
-          <input x-model.number="relay_remote_offset" type="number"
-                 class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
-        </label>
-      </div>
     </div>
 
     <div class="mt-4 flex items-center gap-3">
@@ -258,6 +185,11 @@
         <input x-model="default_hilink_password" type="password"
                class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm font-mono">
       </label>
+      <label class="block text-xs text-slate-400">Deco admin password (TP-Link Deco local API — rotation via reboot)
+        {% if advanced.deco_pass_file %}<span class="text-slate-500">— currently read from <code>/etc/modemproxy/deco5g.pass</code>; a value here overrides it</span>{% endif %}
+        <input x-model="deco_password" type="password"
+               class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm font-mono">
+      </label>
       <label class="block text-xs text-slate-400">Egress TTL (0 = off; 65 hides tethering from the carrier)
         <input type="number" x-model.number="custom_ttl"
                class="mt-1 w-full bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
@@ -333,28 +265,6 @@
 </div>
 
 <script>
-function tunnelCard(){
-  const t = {{ tunnel | tojson }};
-  return {
-    active: t.active, host: t.host||'', user: t.user||'fwd', port: t.port||2222,
-    busy: false, msg: '', _t: null,
-    init(){ this.active=t.active; },
-    flash(m){ this.msg=m; clearTimeout(this._t); this._t=setTimeout(()=>this.msg='',3000); },
-    async save(){
-      this.busy=true;
-      try{
-        const r=await (await fetch('/api/tunnel',{method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ssh_tunnel_host:this.host,ssh_tunnel_user:this.user,ssh_tunnel_port:this.port})})).json();
-        this.active=r.active; this.flash('Saved ✓');
-      } finally{ this.busy=false; }
-    },
-    async disconnect(){
-      this.host=''; await this.save();
-    },
-    copy(t){ if(t) navigator.clipboard.writeText(t); },
-  }
-}
 function custs(){
   return {
     list: {{ customers | tojson }}, modems: {{ all_modems | tojson }}, nu:'', np:'',
@@ -375,14 +285,14 @@ function custs(){
 function advanced(){
   const a = {{ advanced | tojson }};
   return {
-    default_hilink_password:a.default_hilink_password||'', custom_ttl:a.custom_ttl||0,
+    default_hilink_password:a.default_hilink_password||'', deco_password:a.deco_password||'', custom_ttl:a.custom_ttl||0,
     rotation_retry:a.rotation_retry, rotation_unique:a.rotation_unique,
     rotation_max_retry:a.rotation_max_retry||3, rotation_min_interval:a.rotation_min_interval||0,
     autoreboot_enable:a.autoreboot_enable, autoreboot_max_score:a.autoreboot_max_score||100,
     busy:false, saved:false, _t:null,
     async save(){ this.busy=true; this.saved=false;
       try{ await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({default_hilink_password:this.default_hilink_password,
+        body:JSON.stringify({default_hilink_password:this.default_hilink_password,deco_password:this.deco_password,
           custom_ttl:this.custom_ttl,rotation_retry:this.rotation_retry,
           rotation_unique:this.rotation_unique,rotation_max_retry:this.rotation_max_retry,
           rotation_min_interval:this.rotation_min_interval,autoreboot_enable:this.autoreboot_enable,
@@ -432,13 +342,8 @@ function access(){
   const a = {{ access | tojson }};
   const pub = {{ publish | tojson }};
   return {
-    mode: a.access_mode||'direct',
     public_host: a.public_host||'',
     open_firewall: a.open_firewall,
-    relay_host: a.relay_host||'',
-    relay_port: a.relay_port||7000,
-    relay_token: a.relay_token||'',
-    relay_remote_offset: a.relay_remote_offset||0,
     proxies: pub.proxies||[],
     busy:false, saved:false, _t:null,
     async save(){
@@ -446,10 +351,8 @@ function access(){
       try{
         const r=await (await fetch('/api/access',{method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({access_mode:this.mode,public_host:this.public_host,
-            open_firewall:this.open_firewall,relay_host:this.relay_host,
-            relay_port:this.relay_port,relay_token:this.relay_token,
-            relay_remote_offset:this.relay_remote_offset})})).json();
+          body:JSON.stringify({access_mode:'direct',public_host:this.public_host,
+            open_firewall:this.open_firewall})})).json();
         this.proxies=(r.status&&r.status.proxies)||this.proxies;
         this.saved=true; clearTimeout(this._t); this._t=setTimeout(()=>this.saved=false,2500);
       } finally { this.busy=false; }
