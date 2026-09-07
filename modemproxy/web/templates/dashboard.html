@@ -261,10 +261,10 @@
               </div>
 
               <!-- throughput chart (24h) -->
-              <div class="space-y-2">
+              <div class="space-y-2" x-effect="if(selected) loadChart(selected)">
                 <p class="text-xs font-medium text-slate-400">Throughput (last 24h)</p>
                 <div style="height: 200px; position: relative;">
-                  <canvas :id="`chart_${selected.imei}`"></canvas>
+                  <canvas :id="`chart_${selected?.imei}`" style="max-height: 200px;"></canvas>
                 </div>
               </div>
 
@@ -344,7 +344,7 @@ function dashboard(){
       this.newWl=(JSON.parse(m.white_list||'[]')).join('\n');
       this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null;
       this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both';
-      this.loadThroughput(m); this.loadBandwidthToday(m); this.loadChart(m);
+      this.loadThroughput(m); this.loadBandwidthToday(m);
       clearInterval(this._tpTimer);
       this._tpTimer=setInterval(()=>this.loadThroughput(m), 3000); },
     hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
@@ -365,27 +365,26 @@ function dashboard(){
     async loadThroughput(m){ try{ this.throughput=await this.api('GET',`/api/modems/${m.imei}/throughput`); }catch(e){ } },
     async loadBandwidthToday(m){ try{ this.bwToday=await this.api('GET',`/api/modems/${m.imei}/bandwidth-today`); }catch(e){ } },
     async loadChart(m){
+      if(!m||!m.imei) return;
       try{
+        if(this._chart) this._chart.destroy();
         const data=await fetch(`/api/bandwidth/${m.imei}/series?hours=24`).then(r=>r.json());
         const labels=data.map(d=>new Date(d.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
         const rx=data.map(d=>d.rx/1024/1024), tx=data.map(d=>d.tx/1024/1024);
-        if(this._chart) this._chart.destroy();
-        setTimeout(()=>{
-          const el=document.getElementById(`chart_${m.imei}`);
-          if(!el) return;
-          this._chart=new Chart(el,{
-            type:'line',
-            data:{labels,datasets:[
-              {label:'Download MB',data:rx,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.1)',fill:true,tension:.3,pointRadius:0},
-              {label:'Upload MB',data:tx,borderColor:'#4f8cff',backgroundColor:'rgba(79,140,255,.1)',fill:true,tension:.3,pointRadius:0},
-            ]},
-            options:{responsive:true,maintainAspectRatio:false,
-              plugins:{legend:{labels:{color:'#94a3b8'}}},
-              scales:{x:{ticks:{color:'#64748b',maxTicksLimit:6},grid:{color:'#1f2430'}},
-                      y:{ticks:{color:'#64748b'},grid:{color:'#1f2430'}}}}
-          });
-        }, 50);
-      }catch(e){}
+        const el=document.getElementById(`chart_${m.imei}`);
+        if(!el) return;
+        this._chart=new Chart(el,{
+          type:'line',
+          data:{labels,datasets:[
+            {label:'Download MB',data:rx,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.1)',fill:true,tension:.3,pointRadius:0},
+            {label:'Upload MB',data:tx,borderColor:'#4f8cff',backgroundColor:'rgba(79,140,255,.1)',fill:true,tension:.3,pointRadius:0},
+          ]},
+          options:{responsive:true,maintainAspectRatio:false,
+            plugins:{legend:{labels:{color:'#94a3b8'}}},
+            scales:{x:{ticks:{color:'#64748b',maxTicksLimit:6},grid:{color:'#1f2430'}},
+                    y:{ticks:{color:'#64748b'},grid:{color:'#1f2430'}}}}
+        });
+      }catch(e){ console.error('Chart load failed:',e); }
     },
     closeDrawer(){ clearInterval(this._tpTimer); if(this._chart) this._chart.destroy(); this.selected=null; },
     formatBytes(n){
