@@ -145,22 +145,6 @@
             </button>
           </template>
 
-          <!-- open router admin page -->
-          <template x-if="selected.mgmt_host">
-            <a :href="`/router/${selected.imei}/`" target="_blank"
-               class="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
-              Apri pagina router
-            </a>
-          </template>
-
-          <div class="grid grid-cols-4 gap-3 text-sm">
-            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Operator</p><p x-text="selected.operator||'—'"></p></div>
-            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Public IP</p><p class="font-mono" x-text="selected.ip||'—'"></p></div>
-            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Signal</p><p x-text="(selected.signal||0)+'%'"></p></div>
-            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Throughput</p><p class="font-mono text-brand-400" x-text="throughput.rx_mbps+'↓ / '+throughput.tx_mbps+'↑ Mbps'"></p></div>
-          </div>
-
           <template x-if="selected.http_port">
             <div class="space-y-4">
               <!-- connection strings -->
@@ -323,7 +307,7 @@ function dashboard(){
     selected:null, busy:false, toast:'', newPw:'', newName:'', newInterval:0, newWl:'',
     ussdCode:'', ussdResp:'', testResult:null, speedResult:null,
     newQuotaMB:0, newQuotaDir:'both',
-    throughput:{rx_mbps:0, tx_mbps:0}, bwToday:{day_in:0, day_out:0}, _tpTimer:null,
+    bwToday:{day_in:0, day_out:0},
     init(){},
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
     async api(method,url,body){
@@ -345,9 +329,7 @@ function dashboard(){
       this.newWl=(JSON.parse(m.white_list||'[]')).join('\n');
       this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null;
       this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both';
-      this.loadThroughput(m); this.loadBandwidthToday(m);
-      clearInterval(this._tpTimer);
-      this._tpTimer=setInterval(()=>this.loadThroughput(m), 3000); },
+      this.loadBandwidthToday(m); },
     hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
     async rotate(m){ this.notify('Rotating...'); const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
     async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); if(this.selected&&this.selected.imei===m.imei){this.selected.enabled=1;} await this.refresh(); this.notify('Online'); },
@@ -363,9 +345,8 @@ function dashboard(){
     async connTest(m){ this.testResult={loading:true}; this.testResult=await this.api('POST',`/api/modems/${m.imei}/conn-test`); },
     async runSpeedtest(m){ this.speedResult={loading:true}; this.speedResult=await this.api('POST',`/api/modems/${m.imei}/speedtest`); },
     async setQuota(m){ await this.api('POST',`/api/modems/${m.imei}/quota`,{quota_bytes:Math.round(this.newQuotaMB*1048576),quota_direction:this.newQuotaDir}); await this.refresh(); this.notify(this.newQuotaMB>0?`Quota ${this.newQuotaMB} MB/mo`:'Quota off'); },
-    async loadThroughput(m){ try{ this.throughput=await this.api('GET',`/api/modems/${m.imei}/throughput`); }catch(e){ } },
     async loadBandwidthToday(m){ try{ this.bwToday=await this.api('GET',`/api/modems/${m.imei}/bandwidth-today`); }catch(e){ } },
-    closeDrawer(){ clearInterval(this._tpTimer); this.selected=null; },
+    closeDrawer(){ this.selected=null; },
     formatBytes(n){
       if(n<1024)return n+'B';
       if(n<1024*1024)return(n/1024).toFixed(1)+'KB';
