@@ -135,7 +135,7 @@ def _prefix(entry: dict[str, Any], ipv4: str) -> int:
     return 24
 
 
-def public_ip(iface: str, bind: str | None = None) -> str | None:
+def public_ip(iface: str, bind: str | None = None, max_time: int = 12) -> str | None:
     """Public WAN IP as seen through a modem.
 
     ``bind`` (a source IP) is used when given: curl's ``--interface`` accepts an
@@ -146,7 +146,8 @@ def public_ip(iface: str, bind: str | None = None) -> str | None:
     """
     binder = bind or iface
     for url in ("https://api.ipify.org", "http://ifconfig.me/ip"):
-        rc, out, _ = _run(["curl", "-s", "--max-time", "12", "--interface", binder, url], timeout=15)
+        rc, out, _ = _run(["curl", "-s", "--max-time", str(max_time), "--interface", binder, url],
+                          timeout=max_time + 3)
         ip = out.strip()
         if rc == 0 and ip and len(ip) <= 45 and ip.count(".") == 3:
             return ip
@@ -430,11 +431,17 @@ def rotate(modem: dict[str, Any]) -> str | None:
     bind = modem.get("bind_ip") if modem.get("manual") else None
     import time
     ip = None
-    for _ in range(12):          # up to ~36s for re-attach
-        time.sleep(3)
-        ip = public_ip(iface, bind)
-        if ip:
+    # Short probes, tight cadence: while the link re-registers a probe with the
+    # default 12 s timeout just hangs and adds up to 12 s to every rotation.
+    # Callers (rotation hook, extension) give up after ~15 s, so detect the new
+    # IP as soon as it is really there. Still up to ~36 s overall.
+    deadline = time.monotonic() + 36
+    time.sleep(2)
+    while True:
+        ip = public_ip(iface, bind, max_time=4)
+        if ip or time.monotonic() >= deadline:
             break
+        time.sleep(1.5)
     return ip
 
 

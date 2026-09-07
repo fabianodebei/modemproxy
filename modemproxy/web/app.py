@@ -718,7 +718,7 @@ async def api_pool_rotating_set(request: Request, _: str = Depends(admin_auth)):
 # Callers such as the Proxybet browser extension abort after ~15 s, while a
 # rotation can take 20-60 s (Deco reboots). Wait a bit for the result; if the
 # modem is still busy answer 200 {"status": "rotating"} and let it finish.
-HOOK_WAIT_SECONDS = 10.0
+HOOK_WAIT_SECONDS = 13.0   # extension aborts at 15 s
 
 
 @app.get("/hook/rotate/{token}")

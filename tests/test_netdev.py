@@ -146,7 +146,7 @@ def test_rotate_netdev_uses_web_api(monkeypatch):
     from modemproxy.modems import manager
     monkeypatch.setattr(netdev, "_rotate_zte", lambda host, iface=None: True)
     monkeypatch.setattr(netdev, "_rotate_huawei", lambda host, iface=None: False)
-    monkeypatch.setattr(netdev, "public_ip", lambda i, bind=None: "9.9.9.9")
+    monkeypatch.setattr(netdev, "public_ip", lambda i, bind=None, max_time=12: "9.9.9.9")
     import modemproxy.modems.netdev as nd
     monkeypatch.setattr(nd, "_rotate_zte", lambda host, iface=None: True)
     monkeypatch.setattr("time.sleep", lambda s: None)
