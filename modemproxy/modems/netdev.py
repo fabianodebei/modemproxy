@@ -455,8 +455,20 @@ def _deco_password() -> str | None:
         return None
 
 
+_DECO_NET_TYPE = {"nr": "5G", "5g": "5G", "lte": "4G", "4g": "4G",
+                  "wcdma": "3G", "umts": "3G", "hspa": "3G"}
+
+
 def _status_deco(host: str) -> dict[str, Any]:
-    """Operator + signal for a TP-Link Deco via its local API (no goform/HiLink)."""
+    """Operator + signal for a TP-Link Deco.
+
+    The library's ``get_lte_status`` is thin; the device's own
+    ``admin/network?form=internet`` read returns the full ``mobile_cpe`` block
+    (signal %, SIM/dial state, radio type, data usage), which is what the app
+    shows. SMS and the mobile-data toggle are NOT in this local API — they are
+    cloud/app-only on this model — so rotation stays reboot-only elsewhere.
+    """
+    from json import dumps
     try:
         from tplinkrouterc6u.client.deco import TPLinkDecoClient
     except ImportError:
@@ -467,17 +479,37 @@ def _status_deco(host: str) -> dict[str, Any]:
     try:
         c = TPLinkDecoClient(host, pw, verify_ssl=False, timeout=15)
         c.authorize()
-        s = c.get_lte_status()
+        data = c.request("admin/network?form=internet", dumps({"operation": "read"}))
     except Exception:
         return {}
-    out: dict[str, Any] = {}
-    isp = getattr(s, "isp_name", None)
-    if isp:
-        out["operator"] = isp
-    lvl = getattr(s, "sig_level", None)          # 0-5 bars
-    if lvl not in (None, ""):
+    finally:
         try:
-            out["signal"] = int(round(int(lvl) / 5 * 100))
+            c.logout()
+        except Exception:
+            pass
+    cpe = (data or {}).get("mobile_cpe") or {}
+    if not cpe:
+        return {}
+    out: dict[str, Any] = {}
+    # Operator: profile_name is base64 (e.g. "V2luZA==" -> "Wind"); tag the RAT.
+    op = ""
+    prof = cpe.get("profile_name")
+    if prof:
+        try:
+            op = base64.b64decode(prof).decode("utf-8", "replace").strip()
+        except Exception:
+            op = str(prof)
+    rat = _DECO_NET_TYPE.get(str(cpe.get("network_type", "")).lower())
+    if op and rat:
+        out["operator"] = f"{op} · {rat}"
+    elif op:
+        out["operator"] = op
+    elif rat:
+        out["operator"] = rat
+    sig = cpe.get("signal_strength")
+    if sig not in (None, ""):
+        try:
+            out["signal"] = max(0, min(100, int(round(float(sig)))))
         except (TypeError, ValueError):
             pass
     return out
