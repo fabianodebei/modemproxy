@@ -114,7 +114,7 @@
 
   <!-- detail drawer -->
   <div x-show="selected" x-cloak class="fixed inset-0 z-40" style="display:none">
-    <div class="absolute inset-0 bg-black/50" @click="selected=null"></div>
+    <div class="absolute inset-0 bg-black/50" @click="closeDrawer()"></div>
     <div class="absolute right-0 top-0 h-full w-full max-w-md bg-ink-800 border-l border-ink-700 shadow-2xl overflow-y-auto"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0">
@@ -125,7 +125,7 @@
               <h3 class="text-lg font-semibold" x-text="selected.name || selected.model || 'Modem'"></h3>
               <p class="font-mono text-xs text-slate-500" x-text="selected.imei"></p>
             </div>
-            <button @click="selected=null" class="text-slate-500 hover:text-slate-200">✕</button>
+            <button @click="closeDrawer()" class="text-slate-500 hover:text-slate-200">✕</button>
           </div>
 
           <!-- rename -->
@@ -145,11 +145,11 @@
             </button>
           </template>
 
-          <div class="grid grid-cols-2 gap-3 text-sm">
+          <div class="grid grid-cols-4 gap-3 text-sm">
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Operator</p><p x-text="selected.operator||'—'"></p></div>
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Public IP</p><p class="font-mono" x-text="selected.ip||'—'"></p></div>
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Signal</p><p x-text="(selected.signal||0)+'%'"></p></div>
-            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Status</p><p x-text="selected.status"></p></div>
+            <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Throughput</p><p class="font-mono text-brand-400" x-text="throughput.rx_mbps+'↓ / '+throughput.tx_mbps+'↑ Mbps'"></p></div>
           </div>
 
           <template x-if="selected.http_port">
@@ -252,6 +252,14 @@
                 </template>
               </div>
 
+              <!-- bandwidth today -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">Bandwidth (today)</p>
+                <div class="text-xs font-mono text-slate-300">
+                  <p>↓ <span x-text="formatBytes(bwToday.day_in)"></span> | ↑ <span x-text="formatBytes(bwToday.day_out)"></span></p>
+                </div>
+              </div>
+
               <!-- USSD -->
               <div class="space-y-2">
                 <p class="text-xs font-medium text-slate-400">USSD (e.g. balance)</p>
@@ -306,6 +314,7 @@ function dashboard(){
     selected:null, busy:false, toast:'', newPw:'', newName:'', newInterval:0, newWl:'',
     ussdCode:'', ussdResp:'', testResult:null, speedResult:null,
     newQuotaMB:0, newQuotaDir:'both',
+    throughput:{rx_mbps:0, tx_mbps:0}, bwToday:{day_in:0, day_out:0}, _tpTimer:null,
     init(){},
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
     async api(method,url,body){
@@ -326,7 +335,10 @@ function dashboard(){
       this.newInterval=m.rotation_interval||0;
       this.newWl=(JSON.parse(m.white_list||'[]')).join('\n');
       this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null;
-      this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both'; },
+      this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both';
+      this.loadThroughput(m); this.loadBandwidthToday(m);
+      clearInterval(this._tpTimer);
+      this._tpTimer=setInterval(()=>this.loadThroughput(m), 3000); },
     hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
     async rotate(m){ this.notify('Rotating...'); const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
     async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); if(this.selected&&this.selected.imei===m.imei){this.selected.enabled=1;} await this.refresh(); this.notify('Online'); },
@@ -342,6 +354,15 @@ function dashboard(){
     async connTest(m){ this.testResult={loading:true}; this.testResult=await this.api('POST',`/api/modems/${m.imei}/conn-test`); },
     async runSpeedtest(m){ this.speedResult={loading:true}; this.speedResult=await this.api('POST',`/api/modems/${m.imei}/speedtest`); },
     async setQuota(m){ await this.api('POST',`/api/modems/${m.imei}/quota`,{quota_bytes:Math.round(this.newQuotaMB*1048576),quota_direction:this.newQuotaDir}); await this.refresh(); this.notify(this.newQuotaMB>0?`Quota ${this.newQuotaMB} MB/mo`:'Quota off'); },
+    async loadThroughput(m){ try{ this.throughput=await this.api('GET',`/api/modems/${m.imei}/throughput`); }catch(e){ } },
+    async loadBandwidthToday(m){ try{ this.bwToday=await this.api('GET',`/api/modems/${m.imei}/bandwidth-today`); }catch(e){ } },
+    closeDrawer(){ clearInterval(this._tpTimer); this.selected=null; },
+    formatBytes(n){
+      if(n<1024)return n+'B';
+      if(n<1024*1024)return(n/1024).toFixed(1)+'KB';
+      if(n<1024*1024*1024)return(n/(1024*1024)).toFixed(1)+'MB';
+      return(n/(1024*1024*1024)).toFixed(2)+'GB';
+    },
     connStrings(m){
       const a = m.username?`${m.username}:${m.password}@`:'';
       return [

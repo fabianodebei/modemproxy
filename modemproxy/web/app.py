@@ -417,6 +417,36 @@ def api_speedtest(imei: str, _: str = Depends(api_auth)):
     return tests.speedtest(imei)
 
 
+@app.get("/api/modems/{imei}/throughput")
+def api_throughput(imei: str, _: str = Depends(api_auth)):
+    """Current throughput in Mbps (calculated from last 2 samples)."""
+    with db.db() as conn:
+        rows = conn.execute(
+            "SELECT ts, rx_bytes, tx_bytes FROM bandwidth WHERE imei=? ORDER BY ts DESC LIMIT 2",
+            (imei,)
+        ).fetchall()
+    if len(rows) < 2:
+        return {"rx_mbps": 0, "tx_mbps": 0, "ts": None}
+    r0, r1 = rows[0], rows[1]
+    dt = r0["ts"] - r1["ts"]
+    if dt <= 0:
+        return {"rx_mbps": 0, "tx_mbps": 0, "ts": r0["ts"]}
+    drx = max(0, r0["rx_bytes"] - r1["rx_bytes"])
+    dtx = max(0, r0["tx_bytes"] - r1["tx_bytes"])
+    return {
+        "rx_mbps": round(drx * 8 / dt / 1_000_000, 2),
+        "tx_mbps": round(dtx * 8 / dt / 1_000_000, 2),
+        "ts": r0["ts"]
+    }
+
+
+@app.get("/api/modems/{imei}/bandwidth-today")
+def api_bandwidth_today(imei: str, _: str = Depends(api_auth)):
+    """Bandwidth usage for today (down/up in bytes)."""
+    report = bandwidth.report(imei)
+    return {"day_in": report["day_in"], "day_out": report["day_out"]}
+
+
 @app.post("/api/modems/{imei}/quota")
 async def api_set_quota(imei: str, request: Request, _: str = Depends(api_auth)):
     body = await request.json() or {}
