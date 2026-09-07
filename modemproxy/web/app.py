@@ -258,6 +258,13 @@ async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
             out_headers["location"] = v
         elif k == "set-cookie":
             out_headers["set-cookie"] = v
+    # The "livebox" firmware's main.js reloads the page whenever document.cookie
+    # is non-empty (after a cookie wipe that uses an invalid domain=host:port and
+    # so never succeeds). On the device's own IP there are no JS-visible cookies;
+    # on our shared origin there always are (the ZTE UIs write their own), which
+    # turns it into an infinite reload loop. Neutralise that one check.
+    if "javascript" in ctype or path.endswith(".js"):
+        payload = payload.replace(b'if (document.cookie != "" &&', b'if (false &&')
     return Response(content=payload, status_code=code, media_type=ctype,
                     headers=out_headers)
 
