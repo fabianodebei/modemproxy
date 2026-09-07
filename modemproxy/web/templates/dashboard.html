@@ -62,7 +62,10 @@
               <div class="font-mono text-xs text-slate-500" x-text="m.imei"></div>
             </td>
             <td class="px-5 py-3 text-slate-300" x-text="m.operator || '—'"></td>
-            <td class="px-5 py-3 font-mono text-xs" x-text="m.ip || '—'"></td>
+            <td class="px-5 py-3 font-mono text-xs">
+              <span x-text="m.ip || '—'"></span>
+              <div class="text-[10px] text-slate-500 font-sans" x-text="m.geo || ''"></div>
+            </td>
             <td class="px-5 py-3">
               <div class="flex items-center gap-2">
                 <div class="h-1.5 w-16 rounded-full bg-ink-600 overflow-hidden">

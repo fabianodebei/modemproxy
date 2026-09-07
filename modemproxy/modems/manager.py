@@ -67,6 +67,19 @@ def discover() -> list[dict[str, Any]]:
                     autoreboot.record(m["imei"], cfg.score_offline)
     except Exception:
         pass
+    # Post-discover: GeoIP labels for any new public IP, and keep the rotating
+    # pool port in step with which modems are live (best-effort, never fatal).
+    try:
+        from ..services import geoip
+        geoip.refresh_modems()
+    except Exception:
+        pass
+    try:
+        from ..proxy import generator
+        generator.sync_pool()
+    except Exception:
+        pass
+
     return results
 
 
@@ -132,6 +145,11 @@ def rotate(imei: str, reason: str = "manual") -> dict[str, Any]:
 
     db.upsert_modem(imei, ip=new_ip, last_seen=db.now())
     db.log_rotation(imei, old_ip, new_ip, reason)
+    try:                                   # relabel country/city for the new IP
+        from ..services import geoip
+        geoip.refresh_modems()
+    except Exception:
+        pass
     if not new_ip and cfg.autoreboot_enable:
         from ..services import autoreboot
         autoreboot.record(imei, cfg.score_ip_not_detected)

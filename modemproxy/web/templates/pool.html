@@ -6,6 +6,42 @@
 {% block main %}
 <div x-data="{ copy(t){ navigator.clipboard.writeText(t); this.toast='Copied'; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',1500); }, toast:'' }">
 
+  <!-- rotating pool port: one address, every new connection -> a different live modem -->
+  <div x-data="rotating()" class="bg-ink-800 border border-ink-700 rounded-2xl p-5 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h2 class="text-sm font-medium text-slate-200">Rotating port</h2>
+        <p class="text-xs text-slate-500">One address for all SIMs: every new connection is handed to a different live modem.</p>
+      </div>
+      <button @click="toggle()" :disabled="busy"
+              :class="st.enabled ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-600 hover:bg-slate-500'"
+              class="px-3 py-1.5 rounded-lg text-white text-sm disabled:opacity-40"
+              x-text="st.enabled ? '● On — turn off' : '○ Off — turn on'"></button>
+    </div>
+    <template x-if="st.enabled && st.members.length">
+      <div class="space-y-2">
+        <div class="flex items-center gap-2 bg-ink-700/50 rounded-lg px-3 py-2">
+          <span class="text-[10px] uppercase text-slate-500 w-12">HTTP</span>
+          <code class="text-xs flex-1 truncate" x-text="st.http"></code>
+          <button @click="copy(st.http)" class="text-slate-500 hover:text-brand-400" title="Copy">⧉</button>
+        </div>
+        <div class="flex items-center gap-2 bg-ink-700/50 rounded-lg px-3 py-2">
+          <span class="text-[10px] uppercase text-slate-500 w-12">SOCKS</span>
+          <code class="text-xs flex-1 truncate" x-text="st.socks5"></code>
+          <button @click="copy(st.socks5)" class="text-slate-500 hover:text-brand-400" title="Copy">⧉</button>
+        </div>
+        <p class="text-xs text-slate-500">Rotating over <span x-text="st.members.length"></span> modem(s):
+          <span class="text-slate-300" x-text="st.members.map(m=>m.name).join(' · ')"></span></p>
+      </div>
+    </template>
+    <template x-if="st.enabled && !st.members.length">
+      <p class="text-xs text-amber-400">On, but no live modem to rotate over right now.</p>
+    </template>
+    <template x-if="!st.enabled">
+      <p class="text-xs text-slate-500">Off — the per-modem ports below keep working as usual.</p>
+    </template>
+  </div>
+
   <p class="text-sm text-slate-400 mb-4">
     {{ proxies|length }} live prox{{ 'y' if proxies|length==1 else 'ies' }} ·
     API: <code class="text-slate-300">/api/pool</code>,
@@ -33,7 +69,7 @@
         <tr class="hover:bg-ink-700/40">
           <td class="px-5 py-3 font-medium">{{ p.name or p.imei }}</td>
           <td class="px-5 py-3 text-slate-300">{{ p.operator or '—' }}</td>
-          <td class="px-5 py-3 font-mono text-xs">{{ p.ip or '—' }}</td>
+          <td class="px-5 py-3 font-mono text-xs">{{ p.ip or '—' }}{% if p.geo %}<div class="text-[10px] text-slate-500 font-sans">{{ p.geo }}</div>{% endif %}</td>
           <td class="px-5 py-3">
             <button @click="copy('{{ p.http }}')" class="font-mono text-xs text-slate-300 hover:text-brand-400" title="Copy">{{ p.http }} ⧉</button>
           </td>
@@ -51,4 +87,20 @@
     <span x-text="toast"></span>
   </div>
 </div>
+
+<script>
+function rotating(){
+  return {
+    st: {{ rotating | tojson }}, busy:false,
+    async toggle(){
+      this.busy=true;
+      try{
+        const r=await fetch('/api/pool/rotating',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({enable:!this.st.enabled})});
+        if(r.ok) this.st=await r.json();
+      } finally { this.busy=false; }
+    },
+  }
+}
+</script>
 {% endblock %}

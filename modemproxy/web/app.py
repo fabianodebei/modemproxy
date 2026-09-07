@@ -284,7 +284,8 @@ def router_enter(imei: str, user: str = Depends(ui_auth)):
 def pool_page(request: Request, user: str = Depends(ui_auth)):
     return templates.TemplateResponse(
         request, "pool.html",
-        {"user": user, "proxies": _live_proxies(request)},
+        {"user": user, "proxies": _live_proxies(request),
+         "rotating": _rotating_status(request)},
     )
 
 
@@ -645,7 +646,7 @@ def _live_proxies(request: Request) -> list[dict]:
             cred = f"{m['username']}:{m['password']}@" if m.get("username") else ""
             out.append({
                 "imei": m["imei"], "name": m.get("name"),
-                "operator": m.get("operator"), "ip": m.get("ip"),
+                "operator": m.get("operator"), "ip": m.get("ip"), "geo": m.get("geo"),
                 "host": host, "http_port": m["http_port"], "socks_port": m["socks_port"],
                 "http": f"http://{cred}{host}:{m['http_port']}",
                 "socks5": f"socks5h://{cred}{host}:{m['socks_port']}",
@@ -682,6 +683,34 @@ def api_pool_sticky(key: str, request: Request, ttl: int = 600,
         imei = random.choice(proxies)["imei"]
     db.sticky_set(key, imei, max(1, ttl))
     return by_imei[imei]
+
+
+# --- rotating pool port ----------------------------------------------------
+
+def _rotating_status(request: Request) -> dict:
+    """pool_status() plus ready-to-paste URLs for this host."""
+    st = generator.pool_status()
+    host = request.url.hostname
+    cred = f"{st['username']}:{st['password']}@" if st.get("password") else ""
+    st["http"] = f"http://{cred}{host}:{st['http_port']}"
+    st["socks5"] = f"socks5h://{cred}{host}:{st['socks_port']}"
+    return st
+
+
+@app.get("/api/pool/rotating")
+def api_pool_rotating(request: Request, _: str = Depends(api_auth)):
+    return _rotating_status(request)
+
+
+@app.post("/api/pool/rotating")
+async def api_pool_rotating_set(request: Request, _: str = Depends(admin_auth)):
+    """Turn the rotating port on/off and re-sync it with the live modems."""
+    from ..config import update_config
+    body = await request.json() if await request.body() else {}
+    if "enable" in (body or {}):
+        update_config({"pool_enable": bool(body["enable"])})
+    generator.sync_pool()
+    return _rotating_status(request)
 
 
 # Public rotation hook — token-authenticated, no session. Lets external tools

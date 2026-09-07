@@ -80,6 +80,17 @@ class Config:
     default_hilink_password: str = ""     # admin password for ZTE/Huawei web API
     deco_password: str = ""               # admin password for TP-Link Deco local API (rotation via reboot)
 
+    # GeoIP: "IT · Milano" label per modem public IP (ipinfo.io, cached per IP)
+    geoip_enable: bool = True
+
+    # Rotating pool port: ONE http + ONE socks port that hand every new client
+    # connection to a different live modem proxy (3proxy weighted parents).
+    pool_enable: bool = True
+    pool_http_port: int = 0               # 0 = http_port_base (e.g. 18000)
+    pool_socks_port: int = 0              # 0 = socks_port_base (e.g. 19000)
+    pool_username: str = "pool"
+    pool_password: str = ""               # blank = generated on first sync and saved
+
     # Anti-tethering: rewrite egress TTL so the carrier can't spot tethering
     custom_ttl: int = 0                    # 0 = off; typical value 65
 

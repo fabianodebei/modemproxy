@@ -148,6 +148,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE modems ADD COLUMN mgmt_host TEXT")
     if "rt_table" not in mcols:
         conn.execute("ALTER TABLE modems ADD COLUMN rt_table INTEGER")
+    if "geo" not in mcols:
+        conn.execute("ALTER TABLE modems ADD COLUMN geo TEXT")   # "IT · Milano"
+    # Per-IP GeoIP cache so a rotation costs one lookup only when the IP is new.
+    conn.execute("CREATE TABLE IF NOT EXISTS geoip "
+                 "(ip TEXT PRIMARY KEY, label TEXT, ts INTEGER)")
     if "manual" not in mcols:
         conn.execute("ALTER TABLE modems ADD COLUMN manual INTEGER DEFAULT 0")
     if "reboot_score" not in mcols:

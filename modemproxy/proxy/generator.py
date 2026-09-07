@@ -198,13 +198,128 @@ def start_proxy(imei: str) -> dict:
 
 
 def _publish_sync() -> None:
-    """Keep remote-access plumbing (firewall / frpc tunnel) in sync with the
-    live proxy set. Best-effort: never let it break a proxy operation."""
+    """Keep remote-access plumbing (firewall / frpc tunnel) and the rotating
+    pool port in sync with the live proxy set. Best-effort: never let it break
+    a proxy operation."""
     try:
         from ..services import publish
         publish.sync()
     except Exception:
         pass
+    try:
+        sync_pool()
+    except Exception:
+        pass
+
+
+# --- rotating pool port ----------------------------------------------------
+# One HTTP + one SOCKS port (defaults: http_port_base / socks_port_base) whose
+# every new client connection is handed to a different live modem proxy. Done
+# by 3proxy itself via weighted "parent" chains to the per-modem instances, so
+# no extra daemon: it's just another modemproxy-proxy@<POOL_SVC> instance.
+POOL_SVC = "pool"
+
+
+def _pool_members() -> list[dict]:
+    """Live per-modem proxies eligible for the pool, with 3proxy weights
+    summing to 1000 (equal share; remainder on the first)."""
+    import time as _time
+    now = int(_time.time())
+    live = []
+    for m in db.list_modems():
+        expired = m.get("expires_at") and m["expires_at"] <= now
+        if (m.get("status") == "online" and m.get("http_port") and m.get("enabled")
+                and not m.get("quota_locked") and not expired):
+            live.append(m)
+    n = len(live)
+    out = []
+    for i, m in enumerate(live):
+        w = 1000 // n + (1000 % n if i == 0 else 0)
+        out.append({"imei": m["imei"], "name": m.get("name") or m["imei"][-6:],
+                    "http_port": m["http_port"], "socks_port": m["socks_port"],
+                    "username": m.get("username"), "password": m.get("password"),
+                    "weight": w})
+    return out
+
+
+def _pool_ports(cfg) -> tuple[int, int]:
+    return (cfg.pool_http_port or cfg.http_port_base,
+            cfg.pool_socks_port or cfg.socks_port_base)
+
+
+def _pool_password(cfg) -> str:
+    """The pool's own password: generated once and persisted to the config."""
+    if cfg.pool_password:
+        return cfg.pool_password
+    from ..config import update_config
+    pw = secrets.token_hex(8)
+    try:
+        update_config({"pool_password": pw})
+    except Exception:
+        pass
+    return pw
+
+
+def _render_pool_text() -> str | None:
+    cfg = get_config()
+    members = _pool_members()
+    if not members:
+        return None
+    http_port, socks_port = _pool_ports(cfg)
+    dns = " ".join(cfg.dns_servers) if cfg.dns_servers else "1.1.1.1"
+    return _env.get_template("3proxy.pool.cfg.j2").render(
+        dns=dns, username=cfg.pool_username or "pool", password=_pool_password(cfg),
+        http_port=http_port, socks_port=socks_port, bind_address=cfg.bind_address,
+        members=members,
+    )
+
+
+def render_pool() -> Path | None:
+    """Write the pool config; None (and no file) when no modem is live."""
+    text = _render_pool_text()
+    out = AUTOGEN_DIR / f"3proxy.{POOL_SVC}.cfg"
+    if text is None:
+        out.unlink(missing_ok=True)
+        return None
+    AUTOGEN_DIR.mkdir(parents=True, exist_ok=True)
+    out.write_text(text)
+    return out
+
+
+def sync_pool() -> dict:
+    """Bring the pool instance in line with config + live modems. Restarts the
+    instance ONLY when its config actually changed (discover runs every few
+    minutes; a blind restart would cut in-flight pool connections)."""
+    cfg = get_config()
+    unit = f"modemproxy-proxy@{POOL_SVC}.service"
+    out = AUTOGEN_DIR / f"3proxy.{POOL_SVC}.cfg"
+    text = _render_pool_text() if cfg.pool_enable else None
+    if text is None:
+        _systemctl("stop", unit)
+        _systemctl("disable", unit)
+        out.unlink(missing_ok=True)
+        return pool_status()
+    AUTOGEN_DIR.mkdir(parents=True, exist_ok=True)
+    changed = not out.exists() or out.read_text() != text
+    if changed:
+        out.write_text(text)
+    _systemctl("enable", unit)
+    _systemctl("restart" if changed else "start", unit)
+    return pool_status()
+
+
+def pool_status() -> dict:
+    cfg = get_config()
+    http_port, socks_port = _pool_ports(cfg)
+    members = _pool_members()
+    return {
+        "enabled": bool(cfg.pool_enable),
+        "active": bool(cfg.pool_enable and members),
+        "http_port": http_port, "socks_port": socks_port,
+        "username": cfg.pool_username or "pool", "password": cfg.pool_password,
+        "members": [{"imei": m["imei"], "name": m["name"], "weight": m["weight"]}
+                    for m in members],
+    }
 
 
 def _systemctl(action: str, unit: str) -> None:
