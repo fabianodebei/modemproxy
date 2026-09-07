@@ -37,9 +37,9 @@
     </template>
     <template x-for="m in messages" :key="m.id">
       <div class="flex" :class="m.direction==='out' ? 'justify-end' : 'justify-start'">
-        <div class="max-w-[75%] rounded-2xl px-4 py-2"
+        <div class="group max-w-[75%] rounded-2xl px-4 py-2 relative"
              :class="m.direction==='out' ? 'bg-brand-500/20 border border-brand-500/30' : 'bg-ink-700 border border-ink-600'">
-          <div class="flex items-center gap-2 mb-1">
+          <div class="flex items-center gap-2 mb-1 pr-5">
             <span class="text-xs font-medium"
                   :class="m.direction==='out' ? 'text-brand-300' : 'text-emerald-400'"
                   x-text="m.direction==='out' ? ('→ '+m.number) : ('← '+m.number)"></span>
@@ -47,6 +47,8 @@
           </div>
           <p class="text-sm whitespace-pre-wrap break-words" x-text="m.text"></p>
           <p class="text-[10px] text-slate-500 mt-1" x-text="m.date"></p>
+          <button @click="del(m)" :disabled="busy" title="Delete (also on the router)"
+                  class="absolute top-1.5 right-1.5 h-5 w-5 grid place-items-center rounded-full text-slate-500 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition">✕</button>
         </div>
       </div>
     </template>
@@ -106,6 +108,17 @@ function sms(){
         this.toText=''; this.notify('Sent ✓');
         setTimeout(()=>this.load(true), 1500);
       }catch(e){ this.notify('Send failed: '+e.message); }
+      finally{ this.busy=false; }
+    },
+    async del(m){
+      if(!confirm('Delete this SMS? It will also be removed from the router.')) return;
+      this.busy=true;
+      try{
+        const r=await fetch(`/api/modems/${this.imei}/sms/${encodeURIComponent(m.id)}`,{method:'DELETE'});
+        if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText);
+        this.messages=this.messages.filter(x=>x.id!==m.id);
+        this.notify('Deleted ✓');
+      }catch(e){ this.notify('Delete failed: '+e.message); }
       finally{ this.busy=false; }
     },
   }

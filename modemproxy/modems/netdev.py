@@ -731,6 +731,34 @@ def send_sms_zte(host: str, iface: str | None, number: str, text: str) -> bool:
             pass
 
 
+def delete_sms_zte(host: str, iface: str | None, ids: list[str]) -> bool:
+    """Delete one or more SMS on a ZTE device (authed, AD-token for MC801A).
+    ZTE expects msg_id as ';'-joined ids with a trailing ';' (e.g. '3;5;')."""
+    if not ids:
+        return True
+    headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    base = f"http://{host}/goform/goform_set_cmd_process"
+    cj = tempfile.mktemp(prefix="mp_zte_")
+    try:
+        _zte_login(host, iface, cj)
+        wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
+        cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
+        base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+        data = {"isTest": "false", "goformId": "DELETE_SMS",
+                "msg_id": ";".join(ids) + ";", "notCallback": "true"}
+        rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+        if rd and base_hash:
+            data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+        ok, r = _http(iface, base, method="POST", headers=headers, cookies=cj,
+                      data=data, timeout=12)
+        return ok and "failure" not in r.lower()
+    finally:
+        try:
+            os.unlink(cj)
+        except OSError:
+            pass
+
+
 def sms_list(modem: dict[str, Any]) -> list[dict[str, Any]]:
     """Inbox/outbox for a net-mode modem (ZTE only; others return [])."""
     host = modem.get("mgmt_host")
@@ -748,6 +776,15 @@ def sms_send(modem: dict[str, Any], number: str, text: str) -> bool:
         raise NetdevError("SMS not supported on this modem")
     binder = modem.get("bind_ip") if modem.get("manual") else modem.get("iface")
     return send_sms_zte(host, binder, number, text)
+
+
+def sms_delete(modem: dict[str, Any], ids: list[str]) -> bool:
+    """Delete SMS by id on a net-mode modem (ZTE only). Removes on the router."""
+    host = modem.get("mgmt_host")
+    if not host or "deco" in (modem.get("model") or "").lower():
+        raise NetdevError("SMS not supported on this modem")
+    binder = modem.get("bind_ip") if modem.get("manual") else modem.get("iface")
+    return delete_sms_zte(host, binder, ids)
 
 
 def _rotate_huawei(host: str, iface: str | None = None) -> bool:

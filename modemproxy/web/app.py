@@ -447,6 +447,20 @@ async def api_sms_send(imei: str, request: Request, _: str = Depends(api_auth)):
     return {"imei": imei, "ok": True}
 
 
+@app.delete("/api/modems/{imei}/sms/{sms_id}")
+def api_sms_delete(imei: str, sms_id: str, _: str = Depends(api_auth)):
+    m = db.get_modem(imei)
+    if not m:
+        raise HTTPException(404, "modem not found")
+    try:
+        ok = netdev.sms_delete(m, [s for s in sms_id.split(",") if s])
+    except netdev.NetdevError as e:
+        raise HTTPException(503, str(e))
+    if not ok:
+        raise HTTPException(502, "delete failed")
+    return {"imei": imei, "ok": True}
+
+
 @app.post("/api/modems/{imei}/conn-test")
 def api_conn_test(imei: str, _: str = Depends(api_auth)):
     return tests.conn_test(imei)
