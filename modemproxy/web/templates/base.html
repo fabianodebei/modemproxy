@@ -22,6 +22,22 @@
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script>
+    // Copy-to-clipboard that also works over plain HTTP (VPN/LAN): the async
+    // Clipboard API exists only in secure contexts, so fall back to a hidden
+    // textarea + execCommand('copy'). Resolves true/false.
+    window.mpCopy = async function (t) {
+      t = (t === undefined || t === null) ? '' : String(t);
+      try { if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(t); return true; } } catch (e) {}
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = t; ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '-9999px';
+        document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, t.length);
+        const ok = document.execCommand('copy'); document.body.removeChild(ta); return !!ok;
+      } catch (e) { return false; }
+    };
+  </script>
   <style>
     body { font-family:'Inter',system-ui,sans-serif; }
     ::-webkit-scrollbar{width:10px;height:10px}

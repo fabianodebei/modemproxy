@@ -357,7 +357,7 @@ function access(){
         this.saved=true; clearTimeout(this._t); this._t=setTimeout(()=>this.saved=false,2500);
       } finally { this.busy=false; }
     },
-    copy(t){ if(t) navigator.clipboard.writeText(t); },
+    copy(t){ if(t) mpCopy(t).then(ok=>this.flash(ok?'Copied ✓':'Copy failed')); },
   }
 }
 function keys(){
@@ -371,7 +371,7 @@ function keys(){
         this.fresh=r.key; this.label=''; await this.refresh(); this.notify('Key created'); }
       finally{ this.busy=false; } },
     async revoke(k){ await fetch('/api/keys/'+encodeURIComponent(k),{method:'DELETE'}); if(this.fresh.startsWith(k.slice(0,5)))this.fresh=''; await this.refresh(); this.notify('Revoked'); },
-    copy(t){ navigator.clipboard.writeText(t); this.notify('Copied'); },
+    copy(t){ mpCopy(t).then(ok=>this.notify(ok?'Copied':'Copy failed')); },
   }
 }
 </script>

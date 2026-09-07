@@ -4,7 +4,7 @@
 {% block page_title %}Allocation pool{% endblock %}
 
 {% block main %}
-<div x-data="{ copy(t){ navigator.clipboard.writeText(t); this.toast='Copied'; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',1500); }, toast:'' }">
+<div x-data="{ copy(t){ mpCopy(t).then(ok=>{ this.toast=ok?'Copied':'Copy failed'; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',1500); }); }, toast:'' }">
 
   <!-- rotating pool port: one address, every new connection -> a different live modem -->
   <div x-data="rotating()" class="bg-ink-800 border border-ink-700 rounded-2xl p-5 mb-6">

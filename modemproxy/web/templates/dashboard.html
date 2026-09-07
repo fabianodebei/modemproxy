@@ -364,7 +364,7 @@ function dashboard(){
         {label:'curl', value:`curl -x http://${a}${SERVER_HOST}:${m.http_port} https://api.ipify.org`},
       ];
     },
-    copy(t){ navigator.clipboard.writeText(t); this.notify('Copied'); },
+    copy(t){ mpCopy(t).then(ok=>this.notify(ok?'Copied':'Copy failed')); },
   }
 }
 </script>

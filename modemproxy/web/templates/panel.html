@@ -85,7 +85,7 @@ function panel(){
   return {
     busy:'', msg:{}, toast:'',
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2000); },
-    copy(t){ navigator.clipboard.writeText(t); this.notify('Copied'); },
+    copy(t){ mpCopy(t).then(ok=>this.notify(ok?'Copied':'Copy failed')); },
     async rotate(imei){ this.busy=imei;
       try{ const r=await fetch('/panel/rotate/'+encodeURIComponent(imei),{method:'POST'});
         const j=await r.json();
