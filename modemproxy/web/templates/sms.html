@@ -20,11 +20,18 @@
       <option value="{{ m.imei }}">{{ m.name or m.model or m.imei }}</option>
       {% endfor %}
     </select>
-    <button @click="load()" :disabled="busy"
-            class="flex items-center gap-2 bg-ink-700 hover:bg-ink-600 disabled:opacity-50 rounded-lg px-3 py-1.5 text-sm">
-      <svg class="h-4 w-4" :class="busy && 'animate-spin'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
-      Refresh
-    </button>
+    <div class="flex items-center gap-2">
+      <a :href="`/router/${imei}/`" target="_blank"
+         class="flex items-center gap-2 bg-ink-700 hover:bg-ink-600 rounded-lg px-3 py-1.5 text-sm">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+        Router
+      </a>
+      <button @click="load()" :disabled="busy"
+              class="flex items-center gap-2 bg-ink-700 hover:bg-ink-600 disabled:opacity-50 rounded-lg px-3 py-1.5 text-sm">
+        <svg class="h-4 w-4" :class="busy && 'animate-spin'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+        Refresh
+      </button>
+    </div>
   </div>
 
   <!-- message list -->

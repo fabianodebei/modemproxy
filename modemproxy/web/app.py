@@ -7,13 +7,15 @@ either the session cookie or HTTP basic auth.
 from __future__ import annotations
 
 import base64
+import re
 import secrets
+import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import (
-    HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
+    HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -198,6 +200,80 @@ def sms_page(request: Request, user: str = Depends(ui_auth)):
     return templates.TemplateResponse(
         request, "sms.html", {"user": user, "modems": modems},
     )
+
+
+@app.get("/router/{imei}")
+def router_root(imei: str, user: str = Depends(ui_auth)):
+    return RedirectResponse(f"/router/{imei}/", status_code=307)
+
+
+@app.api_route("/router/{imei}/{path:path}", methods=["GET", "POST"])
+async def router_proxy(imei: str, path: str, request: Request,
+                       user: str = Depends(ui_auth)):
+    """Reverse-proxy a net-mode modem's own web UI so it's reachable through the
+    panel (even remotely). Assets are relative, so injecting a <base> tag makes
+    the whole SPA resolve under /router/{imei}/; absolute redirects to the
+    device IP and Set-Cookie paths are rewritten to stay inside the prefix."""
+    m = db.get_modem(imei)
+    host = m.get("mgmt_host") if m else None
+    if not host:
+        raise HTTPException(404, "modem not found")
+    binder = m.get("bind_ip") if m.get("manual") else m.get("iface")
+    prefix = f"/router/{imei}/"
+
+    target = f"http://{host}/{path}"
+    if request.url.query:
+        target += "?" + request.url.query
+    args = ["curl", "-s", "-i", "--compressed", "--max-time", "25"]
+    if binder:
+        args += ["--interface", binder]
+    if ck := request.headers.get("cookie"):
+        args += ["-H", f"Cookie: {ck}"]
+    args += ["-H", f"Referer: http://{host}/"]
+    body = b""
+    if request.method == "POST":
+        body = await request.body()
+        ct = request.headers.get("content-type", "application/x-www-form-urlencoded")
+        args += ["-X", "POST", "-H", f"Content-Type: {ct}", "--data-binary", "@-"]
+    try:
+        p = subprocess.run(args + [target], input=body, capture_output=True, timeout=30)
+    except (subprocess.SubprocessError, OSError):
+        raise HTTPException(504, "router unreachable")
+    raw = p.stdout
+    sep = raw.find(b"\r\n\r\n")
+    if sep < 0:
+        raise HTTPException(502, "bad response from router")
+    head, payload = raw[:sep].decode("latin1"), raw[sep + 4:]
+    lines = head.split("\r\n")
+    try:
+        code = int(lines[0].split()[1])
+    except (IndexError, ValueError):
+        code = 200
+    ctype, out_headers = "application/octet-stream", {}
+    for ln in lines[1:]:
+        k, _, v = ln.partition(":")
+        k, v = k.strip().lower(), v.strip()
+        if k == "content-type":
+            ctype = v
+        elif k == "location":                       # keep redirects inside the prefix
+            if v.startswith(f"http://{host}/"):
+                v = prefix + v[len(f"http://{host}/"):]
+            elif v.startswith("/"):
+                v = prefix + v.lstrip("/")
+            out_headers["location"] = v
+        elif k == "set-cookie":                      # isolate router cookies to the prefix
+            out_headers["set-cookie"] = re.sub(r";\s*[Pp]ath=[^;]*", "", v) + f"; Path={prefix}"
+    if "text/html" in ctype:
+        html = payload.decode("utf-8", "replace")
+        html = html.replace(f"http://{host}/", prefix)
+        base_tag = f'<base href="{prefix}">'
+        if re.search(r"<head[^>]*>", html, re.I):
+            html = re.sub(r"(<head[^>]*>)", r"\1" + base_tag, html, count=1, flags=re.I)
+        else:
+            html = base_tag + html
+        payload = html.encode("utf-8")
+    return Response(content=payload, status_code=code, media_type=ctype,
+                    headers=out_headers)
 
 
 @app.get("/pool", response_class=HTMLResponse)

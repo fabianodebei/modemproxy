@@ -145,6 +145,15 @@
             </button>
           </template>
 
+          <!-- open router admin page -->
+          <template x-if="selected.mgmt_host">
+            <a :href="`/router/${selected.imei}/`" target="_blank"
+               class="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-lg bg-ink-700 hover:bg-ink-600 text-sm">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+              Apri pagina router
+            </a>
+          </template>
+
           <div class="grid grid-cols-4 gap-3 text-sm">
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Operator</p><p x-text="selected.operator||'—'"></p></div>
             <div class="bg-ink-700/50 rounded-xl p-3"><p class="text-xs text-slate-500">Public IP</p><p class="font-mono" x-text="selected.ip||'—'"></p></div>
