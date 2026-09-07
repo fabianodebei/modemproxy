@@ -845,7 +845,10 @@ async def api_settings_update(request: Request, _: str = Depends(admin_auth)):
 @app.post("/api/alert-test")
 def api_alert_test(_: str = Depends(admin_auth)):
     from ..services import alerts
-    return {"sent": alerts.notify("test alert — modemproxy is wired up ✅")}
+    ok = alerts.notify("test alert — modemproxy is wired up ✅")
+    # Telegram's own description (e.g. "Bad Request: chat not found" = the
+    # user never pressed Start on the bot) so the panel can say why.
+    return {"sent": ok, "error": None if ok else alerts.LAST_ERROR}
 
 
 @app.get("/api/tunnel")

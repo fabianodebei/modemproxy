@@ -335,7 +335,7 @@ function alerting(){
       finally{ this.busy=false; } },
     async test(){ await this.save();
       const r=await (await fetch('/api/alert-test',{method:'POST'})).json();
-      this.flash(r.sent?'Test sent ✓':'Not sent — check token/chat id'); },
+      this.flash(r.sent?'Test sent ✓':('Not sent — '+(r.error||'check token/chat id'))); },
   }
 }
 function access(){
