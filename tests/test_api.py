@@ -47,6 +47,10 @@ def test_login_then_dashboard(client):
     r2 = client.get("/")          # cookie carried by TestClient
     assert r2.status_code == 200
     assert "Dashboard" in r2.text
+    # Customer-facing hosts come from public_host, never from the address the
+    # admin is browsing from (LAN IP / VPN 10.66.66.1).
+    assert 'const SERVER_HOST = "proxy.example.net"' in r2.text
+    assert 'const HOOK_BASE = "https://proxy.example.net"' in r2.text
 
 
 def test_login_bad_password(client):

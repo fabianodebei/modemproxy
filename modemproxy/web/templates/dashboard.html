@@ -303,7 +303,10 @@
 </div>
 
 <script>
-const SERVER_HOST = {{ (cfg.bind_address if cfg.bind_address != '0.0.0.0' else request.url.hostname) | tojson }};
+// Host customers dial: the configured public host (DDNS) wins over whatever
+// address the admin happens to be browsing from (LAN IP, VPN 10.66.66.1...).
+const SERVER_HOST = {{ (cfg.public_host or (cfg.bind_address if cfg.bind_address != '0.0.0.0' else request.url.hostname)) | tojson }};
+const HOOK_BASE = {{ (('https://' + cfg.public_host) if cfg.public_host else '') | tojson }};
 function dashboard(){
   return {
     modems: {{ modems | tojson }},
@@ -333,7 +336,7 @@ function dashboard(){
       this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null;
       this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both';
       this.loadBandwidthToday(m); },
-    hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
+    hookUrl(m){ return `${HOOK_BASE || location.origin}/hook/rotate/${m.rotation_token}`; },
     async rotate(m){ this.notify('Rotating...'); const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },
     async apply(m){ await this.api('POST',`/api/modems/${m.imei}/apply-port`); if(this.selected&&this.selected.imei===m.imei){this.selected.enabled=1;} await this.refresh(); this.notify('Online'); },
     async disableModem(m){ await this.api('POST',`/api/modems/${m.imei}/disable`); if(this.selected&&this.selected.imei===m.imei){this.selected.enabled=0;} await this.refresh(); this.notify('Offline'); },

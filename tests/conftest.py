@@ -15,6 +15,7 @@ _TMP = Path(tempfile.mkdtemp(prefix="modemproxy-test-"))
     "admin_password: testpass\n"
     "session_secret: testsecret\n"
     "vpn_public_host: 203.0.113.50\n"
+    "public_host: proxy.example.net\n"
     f"db_path: {_TMP / 'test.db'}\n"
 )
 
