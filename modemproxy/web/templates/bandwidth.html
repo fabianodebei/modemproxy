@@ -40,6 +40,21 @@
     </table>
   </div>
 
+  <!-- current throughput -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <template x-for="m in modems" :key="m.imei">
+      <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+        <p class="text-xs text-slate-400" x-text="m.name || m.model || m.imei"></p>
+        <p class="text-sm font-mono mt-2">
+          <span class="text-emerald-400" x-text="throughput[m.imei]?.rx_mbps || '—'"></span>↓
+          <span class="text-slate-500">/</span>
+          <span class="text-brand-400" x-text="throughput[m.imei]?.tx_mbps || '—'"></span>↑
+          <span class="text-slate-500 text-xs">Mbps</span>
+        </p>
+      </div>
+    </template>
+  </div>
+
   <!-- per-modem chart -->
   <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
     <div class="flex items-center justify-between mb-4">
@@ -60,8 +75,15 @@
 function bw(){
   return {
     imei: {{ (modems[0].imei if modems else '') | tojson }},
-    chart:null,
-    async init(){ if(this.imei) await this.load(); },
+    chart:null, throughput:{}, modems: {{ modems | tojson }}, _tpTimer:null,
+    async init(){ if(this.imei) await this.load(); this.loadAllThroughput(); this._tpTimer=setInterval(()=>this.loadAllThroughput(), 3000); },
+    async loadAllThroughput(){
+      for(const m of this.modems){
+        try{
+          this.throughput[m.imei]=await(await fetch(`/api/modems/${m.imei}/throughput`)).json();
+        }catch(e){}
+      }
+    },
     async load(){
       const data=await (await fetch(`/api/bandwidth/${this.imei}/series?hours=24`)).json();
       const labels=data.map(d=>new Date(d.ts*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
