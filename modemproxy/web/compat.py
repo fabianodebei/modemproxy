@@ -33,17 +33,30 @@ _basic = HTTPBasic(auto_error=False)
 
 # --- auth ------------------------------------------------------------------
 
+_generated: str | None = None
+
+
 def api_password() -> str:
-    """The storefront's API password: generated once and persisted."""
+    """The storefront's API password: generated once and persisted.
+
+    Re-reads the config file when the cached copy has no password (it may
+    have been written by another process, e.g. an admin CLI) and keeps the
+    generated value in memory if the file is not writable, so the password
+    stays stable for the life of the process either way.
+    """
+    global _generated
     cfg = get_config()
+    if not cfg.compat_api_password:
+        cfg = get_config(reload=True)
     if cfg.compat_api_password:
         return cfg.compat_api_password
-    pw = secrets.token_urlsafe(18)
-    try:
-        update_config({"compat_api_password": pw})
-    except Exception:
-        pass
-    return pw
+    if _generated is None:
+        _generated = secrets.token_urlsafe(18)
+        try:
+            update_config({"compat_api_password": _generated})
+        except Exception:
+            pass
+    return _generated
 
 
 def compat_auth(creds: HTTPBasicCredentials | None = Depends(_basic)) -> str:
