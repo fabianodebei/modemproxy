@@ -145,8 +145,10 @@ def _port_entry(m: dict, host: str) -> dict:
         "HTTP_PORT": str(http_port), "SOCKS_PORT": str(socks_port),
         "LOGIN": u["username"], "PASSWORD": u["password"],
         "OWNER": get_config().compat_owner, "IMEI": m["imei"],
-        "http_creds": f"{host}:{http_port}:{u['username']}:{u['password']}",
-        "socks5_creds": f"{host}:{socks_port}:{u['username']}:{u['password']}",
+        # proxysmart format: "http://host:port:user:pass" for BOTH entries
+        # (Proxybet's Export page parses them with that exact prefix).
+        "http_creds": f"http://{host}:{http_port}:{u['username']}:{u['password']}",
+        "socks5_creds": f"http://{host}:{socks_port}:{u['username']}:{u['password']}",
         "conns_stats": {"http": 0, "socks5": 0, "total": 0, "xray": 0},
         "IS_EXPIRED": 1 if expired else 0,
         "IS_OVER_QUOTA": 1 if m.get("quota_locked") else 0,

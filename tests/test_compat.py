@@ -1,3 +1,4 @@
+import re
 """proxysmart-compatible API (/apix, /modem, /crud) used by Proxybet."""
 import json
 
@@ -63,6 +64,9 @@ def test_list_ports_creates_storefront_login_without_touching_main(client, auth,
     assert entry["LOGIN"].startswith("proxybet-") and len(entry["PASSWORD"]) == 16
     assert entry["LOGIN"] != "odds_a"
     assert entry["http_creds"].endswith(f":{entry['LOGIN']}:{entry['PASSWORD']}")
+    # Proxybet parses creds with /http:\/\/([^:]+):(\d+):([^:]+):(.+)/
+    assert re.match(r"http://[^:]+:\d+:[^:]+:.+", entry["http_creds"])
+    assert entry["socks5_creds"].startswith("http://")
     assert entry["IS_EXPIRED"] == 0 and entry["IS_OVER_QUOTA"] == 0
     # main login untouched; both logins present in the 3proxy config
     port = db.get_port(modem)
