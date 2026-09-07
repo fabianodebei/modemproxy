@@ -85,21 +85,26 @@ function bw(){
       }
     },
     async load(){
-      const data=await (await fetch(`/api/bandwidth/${this.imei}/series?hours=24`)).json();
+      try{
+      const r=await fetch(`/api/bandwidth/${this.imei}/series?hours=24`);
+      const data=await r.json();
+      const el=document.getElementById('chart');
       const labels=data.map(d=>new Date(d.ts*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
       const rx=data.map(d=>d.rx/1024/1024), tx=data.map(d=>d.tx/1024/1024);
       if(this.chart) this.chart.destroy();
-      this.chart=new Chart(document.getElementById('chart'),{
+      const prev=el&&window.Chart&&Chart.getChart(el); if(prev) prev.destroy();
+      this.chart=new Chart(el,{
         type:'line',
         data:{labels,datasets:[
           {label:'Download MB',data:rx,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.1)',fill:true,tension:.3,pointRadius:0},
           {label:'Upload MB',data:tx,borderColor:'#4f8cff',backgroundColor:'rgba(79,140,255,.1)',fill:true,tension:.3,pointRadius:0},
         ]},
-        options:{responsive:true,maintainAspectRatio:false,
+        options:{responsive:true,maintainAspectRatio:false,animation:false,
           plugins:{legend:{labels:{color:'#94a3b8'}}},
           scales:{x:{ticks:{color:'#64748b',maxTicksLimit:8},grid:{color:'#1f2430'}},
                   y:{ticks:{color:'#64748b'},grid:{color:'#1f2430'}}}}
       });
+      }catch(e){ console.error('chart load failed:', e); }
     }
   }
 }

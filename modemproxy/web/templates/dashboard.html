@@ -260,14 +260,6 @@
                 </div>
               </div>
 
-              <!-- throughput chart (24h) -->
-              <div class="space-y-2">
-                <p class="text-xs font-medium text-slate-400">Throughput (last 24h)</p>
-                <div style="height: 200px; position: relative;">
-                  <canvas id="drawerChart" style="max-height: 200px;"></canvas>
-                </div>
-              </div>
-
               <!-- USSD -->
               <div class="space-y-2">
                 <p class="text-xs font-medium text-slate-400">USSD (e.g. balance)</p>
@@ -322,8 +314,8 @@ function dashboard(){
     selected:null, busy:false, toast:'', newPw:'', newName:'', newInterval:0, newWl:'',
     ussdCode:'', ussdResp:'', testResult:null, speedResult:null,
     newQuotaMB:0, newQuotaDir:'both',
-    throughput:{rx_mbps:0, tx_mbps:0}, bwToday:{day_in:0, day_out:0}, _tpTimer:null, _chart:null,
-    init(){ this.$watch('selected', v=>{ if(!v && this._chart){ this._chart.destroy(); this._chart=null; } }); },
+    throughput:{rx_mbps:0, tx_mbps:0}, bwToday:{day_in:0, day_out:0}, _tpTimer:null,
+    init(){},
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
     async api(method,url,body){
       this.busy=true;
@@ -345,7 +337,6 @@ function dashboard(){
       this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null;
       this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both';
       this.loadThroughput(m); this.loadBandwidthToday(m);
-      this.$nextTick(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>this.loadChart(m))));
       clearInterval(this._tpTimer);
       this._tpTimer=setInterval(()=>this.loadThroughput(m), 3000); },
     hookUrl(m){ return `${location.origin}/hook/rotate/${m.rotation_token}`; },
@@ -365,30 +356,7 @@ function dashboard(){
     async setQuota(m){ await this.api('POST',`/api/modems/${m.imei}/quota`,{quota_bytes:Math.round(this.newQuotaMB*1048576),quota_direction:this.newQuotaDir}); await this.refresh(); this.notify(this.newQuotaMB>0?`Quota ${this.newQuotaMB} MB/mo`:'Quota off'); },
     async loadThroughput(m){ try{ this.throughput=await this.api('GET',`/api/modems/${m.imei}/throughput`); }catch(e){ } },
     async loadBandwidthToday(m){ try{ this.bwToday=await this.api('GET',`/api/modems/${m.imei}/bandwidth-today`); }catch(e){ } },
-    async loadChart(m){
-      if(!m||!m.imei) return;
-      try{
-        const data=await fetch(`/api/bandwidth/${m.imei}/series?hours=24`).then(r=>r.json());
-        const labels=data.map(d=>new Date(d.ts*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}));
-        const rx=data.map(d=>d.rx/1024/1024), tx=data.map(d=>d.tx/1024/1024);
-        const el=document.getElementById('drawerChart');
-        if(!el||!document.body.contains(el)) return;
-        const prev=Chart.getChart(el); if(prev) prev.destroy();
-        if(this._chart){ this._chart.destroy(); this._chart=null; }
-        this._chart=new Chart(el,{
-          type:'line',
-          data:{labels,datasets:[
-            {label:'Download MB',data:rx,borderColor:'#34d399',backgroundColor:'rgba(52,211,153,.1)',fill:true,tension:.3,pointRadius:0},
-            {label:'Upload MB',data:tx,borderColor:'#4f8cff',backgroundColor:'rgba(79,140,255,.1)',fill:true,tension:.3,pointRadius:0},
-          ]},
-          options:{responsive:true,maintainAspectRatio:false,
-            plugins:{legend:{labels:{color:'#94a3b8'}}},
-            scales:{x:{ticks:{color:'#64748b',maxTicksLimit:6},grid:{color:'#1f2430'}},
-                    y:{ticks:{color:'#64748b'},grid:{color:'#1f2430'}}}}
-        });
-      }catch(e){ console.error('Chart load failed:',e); }
-    },
-    closeDrawer(){ clearInterval(this._tpTimer); if(this._chart) this._chart.destroy(); this.selected=null; },
+    closeDrawer(){ clearInterval(this._tpTimer); this.selected=null; },
     formatBytes(n){
       if(n<1024)return n+'B';
       if(n<1024*1024)return(n/1024).toFixed(1)+'KB';
