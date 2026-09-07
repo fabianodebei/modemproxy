@@ -6,14 +6,12 @@ log /var/log/modemproxy/3proxy.{{ svc }}.log D
 logformat "- +_L%t.%. %N.%p %E %U %C:%c %R:%r %O %I %h %T"
 rotate 7
 
-{% if username and white_list %}
-users {{ username }}:CL:{{ password }}
-auth strong
-allow {{ username }} {{ white_list }}
-{% elif username %}
-users {{ username }}:CL:{{ password }}
-auth strong
-allow {{ username }}
+{# all_users = main login + extra logins (e.g. storefront customers): every one
+   of them is accepted on this modem's ports. #}
+{% if all_users %}
+{% for u in all_users %}users {{ u.username }}:CL:{{ u.password }}
+{% endfor %}auth strong
+allow {{ all_users | map(attribute='username') | join(',') }}{% if white_list %} {{ white_list }}{% endif %}
 {% elif white_list %}
 auth iponly
 allow * {{ white_list }}

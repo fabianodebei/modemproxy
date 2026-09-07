@@ -91,6 +91,15 @@ class Config:
     pool_username: str = "pool"
     pool_password: str = ""               # blank = generated on first sync and saved
 
+    # proxysmart-compatible API (/apix, /modem, /crud) used by the Proxybet
+    # storefront's Supabase functions. HTTP Basic auth. Storefront credentials
+    # are kept as EXTRA logins on each modem proxy (owner tag below), so the
+    # modem's main login (e.g. the scraper's) is never overwritten.
+    compat_api_enable: bool = True
+    compat_api_user: str = "proxy"
+    compat_api_password: str = ""         # blank = generated on first use and saved
+    compat_owner: str = "proxybet"
+
     # Anti-tethering: rewrite egress TTL so the carrier can't spot tethering
     custom_ttl: int = 0                    # 0 = off; typical value 65
 

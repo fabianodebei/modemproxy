@@ -100,6 +100,7 @@ def render_modem(imei: str) -> Path:
         dns=dns,
         username=port.get("username"),
         password=port.get("password"),
+        all_users=_all_users(port),
         http_port=port["http_port"],
         socks_port=port["socks_port"],
         # net-mode dongles egress from their local interface IP (bind_ip);
@@ -112,6 +113,64 @@ def render_modem(imei: str) -> Path:
     out = AUTOGEN_DIR / f"3proxy.{_svc(imei)}.cfg"
     out.write_text(text)
     return out
+
+
+# --- extra logins -----------------------------------------------------------
+# Besides its main username/password, a modem proxy can accept additional
+# logins, each tagged with an "owner" (e.g. "proxybet" for storefront
+# customers). They share the same ports/egress; only the credentials differ,
+# so a storefront can hand out its own login without touching the main one.
+
+def list_extra_users(imei: str) -> list[dict]:
+    port = db.get_port(imei) or {}
+    try:
+        users = json.loads(port.get("extra_users") or "[]")
+    except ValueError:
+        users = []
+    return [u for u in users if isinstance(u, dict) and u.get("username")]
+
+
+def _all_users(port: dict) -> list[dict]:
+    """Main login first, then extra logins (deduplicated by username)."""
+    out, seen = [], set()
+    if port.get("username") and port.get("password"):
+        out.append({"username": port["username"], "password": port["password"]})
+        seen.add(port["username"])
+    try:
+        extra = json.loads(port.get("extra_users") or "[]")
+    except ValueError:
+        extra = []
+    for u in extra:
+        if isinstance(u, dict) and u.get("username") and u.get("password") \
+                and u["username"] not in seen:
+            out.append({"username": u["username"], "password": u["password"]})
+            seen.add(u["username"])
+    return out
+
+
+def get_extra_user(imei: str, owner: str) -> dict | None:
+    return next((u for u in list_extra_users(imei) if u.get("owner") == owner), None)
+
+
+def set_extra_user(imei: str, owner: str, username: str, password: str) -> dict:
+    """Create or update the extra login tagged ``owner``. Does NOT restart the
+    proxy: call apply_port() afterwards (mirrors store_port + apply_port)."""
+    if not db.get_port(imei):
+        raise ValueError(f"no proxy configured for {imei}")
+    if not username or not password:
+        raise ValueError("username and password required")
+    users = [u for u in list_extra_users(imei) if u.get("owner") != owner]
+    entry = {"owner": owner, "username": username, "password": password}
+    users.append(entry)
+    db.set_port(imei, extra_users=json.dumps(users))
+    return entry
+
+
+def remove_extra_user(imei: str, owner: str) -> None:
+    if not db.get_port(imei):
+        return
+    users = [u for u in list_extra_users(imei) if u.get("owner") != owner]
+    db.set_port(imei, extra_users=json.dumps(users))
 
 
 def set_password(imei: str, password: str) -> dict:

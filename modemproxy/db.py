@@ -138,6 +138,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE ports ADD COLUMN vpn_enabled INTEGER DEFAULT 0")
     if "expires_at" not in cols:
         conn.execute("ALTER TABLE ports ADD COLUMN expires_at INTEGER")
+    if "extra_users" not in cols:
+        # JSON list of {"username","password"}: additional logins accepted on the
+        # same proxy ports (e.g. one per customer) besides the main username.
+        conn.execute("ALTER TABLE ports ADD COLUMN extra_users TEXT")
 
     mcols = {r["name"] for r in conn.execute("PRAGMA table_info(modems)")}
     if "kind" not in mcols:
@@ -199,7 +203,7 @@ def list_modems() -> list[dict[str, Any]]:
             "SELECT m.*, p.http_port, p.socks_port, p.username, p.password, "
             "p.rotation_interval, p.white_list, p.rotation_token, "
             "p.quota_bytes, p.quota_direction, p.quota_locked, p.vpn_enabled, "
-            "p.expires_at, p.enabled "
+            "p.expires_at, p.enabled, p.extra_users "
             "FROM modems m LEFT JOIN ports p ON p.imei = m.imei "
             "ORDER BY m.name"
         ).fetchall()

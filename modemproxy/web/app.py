@@ -900,6 +900,11 @@ def healthz():
     return JSONResponse({"ok": True})
 
 
+# proxysmart-compatible API (/apix, /modem, /crud) for the Proxybet storefront.
+from .compat import router as compat_router  # noqa: E402
+app.include_router(compat_router, include_in_schema=False)
+
+
 # Must stay the LAST route: forwards any path the panel doesn't own to the
 # router selected via /router/<imei>/ (see ROUTER_COOKIE). Without an active
 # router it's a plain 404, so panel behaviour is unchanged.
