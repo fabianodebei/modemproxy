@@ -18,12 +18,15 @@ import base64
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import re
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("modemproxy.netdev")
 
 import httpx
 
@@ -421,15 +424,17 @@ def rotate(modem: dict[str, Any]) -> str | None:
     # reachable via the main table; SO_BINDTODEVICE onto their macvlan is both
     # unnecessary and flaky (same subnet as the parent), so don't bind.
     api_iface = None if modem.get("manual") else iface
+    import time
+    t0 = time.monotonic()
     ok = _rotate_zte(host, api_iface) or _rotate_huawei(host, api_iface)
     if not ok:
         raise NetdevError(f"no supported web API at {host} for {iface}")
+    t_api = time.monotonic() - t0
 
     # Egress-bind by source IP for manual LAN routers (reliable on a same-subnet
     # macvlan), by interface for USB dongles. Poll while the link re-registers so
     # the caller gets the new IP on the first try (no needless rotation retries).
     bind = modem.get("bind_ip") if modem.get("manual") else None
-    import time
     ip = None
     # Short probes, tight cadence: while the link re-registers a probe with the
     # default 12 s timeout just hangs and adds up to 12 s to every rotation.
@@ -442,6 +447,8 @@ def rotate(modem: dict[str, Any]) -> str | None:
         if ip or time.monotonic() >= deadline:
             break
         time.sleep(1.5)
+    log.info("rotate %s: web-api %.1fs, new ip after %.1fs total (%s)",
+             iface, t_api, time.monotonic() - t0, "ok" if ip else "no ip")
     return ip
 
 

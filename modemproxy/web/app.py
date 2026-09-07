@@ -7,6 +7,7 @@ either the session cookie or HTTP basic auth.
 from __future__ import annotations
 
 import base64
+import logging
 import secrets
 import subprocess
 from contextlib import asynccontextmanager
@@ -27,6 +28,15 @@ import random
 from ..modems import control, manager, netdev
 from ..proxy import generator
 from ..services import bandwidth, metrics, openvpn, quota, tests
+
+# uvicorn only configures its own loggers; make the package's INFO lines
+# (rotation timings, netdev diagnostics) reach the journal too.
+_pkg_log = logging.getLogger("modemproxy")
+if not _pkg_log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+    _pkg_log.addHandler(_h)
+    _pkg_log.setLevel(logging.INFO)
 
 BASE = Path(__file__).parent
 _cfg = get_config()
