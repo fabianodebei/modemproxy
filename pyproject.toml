@@ -20,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "itsdangerous>=2.1",
     "tplinkrouterc6u>=5.0",
+    "pycryptodome>=3.15",
 ]
 
 [project.optional-dependencies]

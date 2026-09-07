@@ -665,6 +665,69 @@ def _zte_date(raw: str) -> str:
     return ""
 
 
+# --- ZTE "web encryption" (MF-series dongles, e.g. MF833) -------------------
+# Newer MF-series firmware AES-256-GCM-encrypts sensitive goform fields (SMS
+# number/body, both directions). The browser generates a random 32-byte key,
+# RSA-PKCS1v15-encrypts its 64-char hex form with the device's public key
+# (``cmd=web_crt_get``) and posts it via ``web_http_enstr_set``; from then on
+# the session's fields are base64( IV[12] || GCM-tag[16] || ciphertext ) and
+# the plaintext is the usual UCS2-hex string. Devices without this scheme
+# (MC801A CPE) return no certificate and keep sending plain UCS2-hex.
+
+def _zte_enc_key(host: str, iface: str | None, cj: str, headers: dict[str, str],
+                 base_hash: str) -> bytes | None:
+    """Do the key handshake for this session; returns the AES key or None."""
+    crt = _zte_get(host, iface, cj, headers, "web_crt_get").get("result", "")
+    if "BEGIN PUBLIC KEY" not in crt:
+        return None
+    try:
+        from Crypto.Cipher import PKCS1_v1_5
+        from Crypto.PublicKey import RSA
+        der = base64.b64decode(re.sub(r"-----[^-]+-----", "", crt).strip())
+        pub = RSA.import_key(der)
+        key = os.urandom(32)
+        enstr = base64.b64encode(
+            PKCS1_v1_5.new(pub).encrypt(key.hex().encode())).decode()
+    except Exception:
+        return None
+    data = {"isTest": "false", "goformId": "web_http_enstr_set", "web_enstr": enstr}
+    rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+    if rd and base_hash:
+        data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+    ok, r = _http(iface, f"http://{host}/goform/goform_set_cmd_process", method="POST",
+                  headers=headers, cookies=cj, data=data)
+    return key if ok and "failure" not in r.lower() else None
+
+
+def _zte_gcm_decrypt(key: bytes | None, field: str) -> str:
+    """Decrypt one encrypted field; falls back to the raw value (plain devices)."""
+    if not key or not field:
+        return field or ""
+    try:
+        from Crypto.Cipher import AES
+        blob = base64.b64decode(field + "=" * (-len(field) % 4))
+        iv, tag, ct = blob[:12], blob[12:28], blob[28:]
+        return AES.new(key, AES.MODE_GCM, nonce=iv).decrypt_and_verify(ct, tag) \
+            .decode("ascii", "replace")
+    except Exception:
+        return field
+
+
+def _zte_gcm_encrypt(key: bytes | None, text: str) -> str:
+    if not key:
+        return text
+    from Crypto.Cipher import AES
+    iv = os.urandom(12)
+    ct, tag = AES.new(key, AES.MODE_GCM, nonce=iv).encrypt_and_digest(text.encode())
+    return base64.b64encode(iv + tag + ct).decode()
+
+
+def _zte_base_hash(host: str, iface: str | None, cj: str, headers: dict[str, str]) -> str:
+    wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
+    cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
+    return hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+
+
 def list_sms_zte(host: str, iface: str | None = None) -> list[dict[str, Any]]:
     """Read the ZTE inbox/outbox. Returns newest-first list of dicts:
     {id, number, text, date, direction ('in'|'out'), unread(bool)}."""
@@ -672,6 +735,7 @@ def list_sms_zte(host: str, iface: str | None = None) -> list[dict[str, Any]]:
     cj = tempfile.mktemp(prefix="mp_zte_")
     try:
         _zte_login(host, iface, cj)
+        key = _zte_enc_key(host, iface, cj, headers, _zte_base_hash(host, iface, cj, headers))
         url = (f"http://{host}/goform/goform_get_cmd_process?isTest=false"
                "&cmd=sms_data_total&page=0&data_per_page=500&mem_store=1"
                "&tags=10&order_by=order+by+id+desc")
@@ -687,8 +751,8 @@ def list_sms_zte(host: str, iface: str | None = None) -> list[dict[str, Any]]:
             tag = str(m.get("tag", ""))
             out.append({
                 "id": str(m.get("id", "")),
-                "number": _maybe_ucs2(m.get("number", "")),
-                "text": _ucs2_decode(m.get("content", "")),
+                "number": _maybe_ucs2(_zte_gcm_decrypt(key, m.get("number", ""))),
+                "text": _ucs2_decode(_zte_gcm_decrypt(key, m.get("content", ""))),
                 "date": _zte_date(m.get("date", "")),
                 "direction": "out" if tag in _ZTE_SENT_TAGS else "in",
                 "unread": tag == "0",
@@ -709,14 +773,16 @@ def send_sms_zte(host: str, iface: str | None, number: str, text: str) -> bool:
     cj = tempfile.mktemp(prefix="mp_zte_")
     try:
         _zte_login(host, iface, cj)
-        wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
-        cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
-        base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+        base_hash = _zte_base_hash(host, iface, cj, headers)
+        # Encrypted-web dongles expect Number/MessageBody AES-GCM'd with the
+        # session key; plain devices get the raw values (key is None).
+        key = _zte_enc_key(host, iface, cj, headers, base_hash)
         sms_time = time.strftime("%y;%m;%d;%H;%M;%S;+8")
         data = {
             "isTest": "false", "goformId": "SEND_SMS", "notCallback": "true",
-            "Number": number, "sms_time": sms_time,
-            "MessageBody": _ucs2_encode(text), "ID": "-1", "encode_type": "UNICODE",
+            "Number": _zte_gcm_encrypt(key, number), "sms_time": sms_time,
+            "MessageBody": _zte_gcm_encrypt(key, _ucs2_encode(text)),
+            "ID": "-1", "encode_type": "UNICODE",
         }
         rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
         if rd and base_hash:
