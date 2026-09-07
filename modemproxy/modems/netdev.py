@@ -19,6 +19,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -624,6 +625,129 @@ def reboot_zte(host: str, iface: str | None = None) -> bool:
             os.unlink(cj)
         except OSError:
             pass
+
+
+# --- SMS (net-mode ZTE goform) --------------------------------------------
+# ZTE stores SMS in UCS2 big-endian hex; each message has a numeric ``tag``:
+#   0 = received unread, 1 = received read, 2 = sent, 3 = draft,
+#   4 = send failed, 5 = sending. We treat 2/4/5 as outbound, the rest inbound.
+_ZTE_SENT_TAGS = {"2", "4", "5"}
+
+
+def _ucs2_decode(hexstr: str) -> str:
+    try:
+        return bytes.fromhex(hexstr).decode("utf-16-be", "replace")
+    except (ValueError, TypeError):
+        return hexstr or ""
+
+
+def _ucs2_encode(text: str) -> str:
+    return text.encode("utf-16-be").hex().upper()
+
+
+def _maybe_ucs2(s: str) -> str:
+    """Decode a field that ZTE may return as UCS2 hex (some firmwares hex-encode
+    the sender number too); leave plain text (alphanumeric sender IDs) as-is."""
+    if s and len(s) % 2 == 0 and re.fullmatch(r"[0-9A-Fa-f]+", s) and "00" in s:
+        return _ucs2_decode(s)
+    return s or ""
+
+
+def _zte_date(raw: str) -> str:
+    """ZTE date 'yy,mm,dd,hh,mm,ss,tz' (comma or ';') -> 'YYYY-MM-DD HH:MM'."""
+    parts = re.split(r"[;,]", raw or "")
+    if len(parts) >= 6:
+        yy, mm, dd, hh, mi = parts[0], parts[1], parts[2], parts[3], parts[4]
+        try:
+            return f"20{int(yy):02d}-{int(mm):02d}-{int(dd):02d} {int(hh):02d}:{int(mi):02d}"
+        except ValueError:
+            pass
+    return ""
+
+
+def list_sms_zte(host: str, iface: str | None = None) -> list[dict[str, Any]]:
+    """Read the ZTE inbox/outbox. Returns newest-first list of dicts:
+    {id, number, text, date, direction ('in'|'out'), unread(bool)}."""
+    headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    cj = tempfile.mktemp(prefix="mp_zte_")
+    try:
+        _zte_login(host, iface, cj)
+        url = (f"http://{host}/goform/goform_get_cmd_process?isTest=false"
+               "&cmd=sms_data_total&page=0&data_per_page=500&mem_store=1"
+               "&tags=10&order_by=order+by+id+desc")
+        ok, text = _http(iface, url, headers=headers, cookies=cj, timeout=12)
+        if not ok or not text:
+            return []
+        try:
+            msgs = json.loads(text).get("messages", []) or []
+        except ValueError:
+            return []
+        out = []
+        for m in msgs:
+            tag = str(m.get("tag", ""))
+            out.append({
+                "id": str(m.get("id", "")),
+                "number": _maybe_ucs2(m.get("number", "")),
+                "text": _ucs2_decode(m.get("content", "")),
+                "date": _zte_date(m.get("date", "")),
+                "direction": "out" if tag in _ZTE_SENT_TAGS else "in",
+                "unread": tag == "0",
+            })
+        return out
+    finally:
+        try:
+            os.unlink(cj)
+        except OSError:
+            pass
+
+
+def send_sms_zte(host: str, iface: str | None, number: str, text: str) -> bool:
+    """Send an SMS via the ZTE goform API (authed, AD-token for MC801A CPE)."""
+    import time
+    headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    base = f"http://{host}/goform/goform_set_cmd_process"
+    cj = tempfile.mktemp(prefix="mp_zte_")
+    try:
+        _zte_login(host, iface, cj)
+        wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
+        cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
+        base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+        sms_time = time.strftime("%y;%m;%d;%H;%M;%S;+8")
+        data = {
+            "isTest": "false", "goformId": "SEND_SMS", "notCallback": "true",
+            "Number": number, "sms_time": sms_time,
+            "MessageBody": _ucs2_encode(text), "ID": "-1", "encode_type": "UNICODE",
+        }
+        rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+        if rd and base_hash:
+            data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+        ok, r = _http(iface, base, method="POST", headers=headers, cookies=cj,
+                      data=data, timeout=15)
+        return ok and "failure" not in r.lower()
+    finally:
+        try:
+            os.unlink(cj)
+        except OSError:
+            pass
+
+
+def sms_list(modem: dict[str, Any]) -> list[dict[str, Any]]:
+    """Inbox/outbox for a net-mode modem (ZTE only; others return [])."""
+    host = modem.get("mgmt_host")
+    if not host or "deco" in (modem.get("model") or "").lower():
+        return []
+    # Bind by source IP for manual LAN routers, by iface for USB dongles.
+    binder = modem.get("bind_ip") if modem.get("manual") else modem.get("iface")
+    return list_sms_zte(host, binder)
+
+
+def sms_send(modem: dict[str, Any], number: str, text: str) -> bool:
+    """Send an SMS through a net-mode modem (ZTE only)."""
+    host = modem.get("mgmt_host")
+    if not host or "deco" in (modem.get("model") or "").lower():
+        raise NetdevError("SMS not supported on this modem")
+    binder = modem.get("bind_ip") if modem.get("manual") else modem.get("iface")
+    return send_sms_zte(host, binder, number, text)
 
 
 def _rotate_huawei(host: str, iface: str | None = None) -> bool:

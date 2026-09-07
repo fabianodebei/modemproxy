@@ -1,0 +1,114 @@
+{% extends "app_base.html" %}
+{% set active = 'sms' %}
+{% block title %}SMS · modemproxy{% endblock %}
+{% block page_title %}SMS{% endblock %}
+
+{% block main %}
+<div x-data="sms()" x-init="init()">
+
+  {% if not modems %}
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-10 text-center text-slate-500">
+    No SMS-capable modems (only ZTE net-mode modems expose an SMS API).
+  </div>
+  {% else %}
+
+  <!-- modem selector -->
+  <div class="flex items-center justify-between mb-4">
+    <select x-model="imei" @change="load()"
+            class="bg-ink-700 border border-ink-600 rounded-lg px-3 py-1.5 text-sm">
+      {% for m in modems %}
+      <option value="{{ m.imei }}">{{ m.name or m.model or m.imei }}</option>
+      {% endfor %}
+    </select>
+    <button @click="load()" :disabled="busy"
+            class="flex items-center gap-2 bg-ink-700 hover:bg-ink-600 disabled:opacity-50 rounded-lg px-3 py-1.5 text-sm">
+      <svg class="h-4 w-4" :class="busy && 'animate-spin'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <!-- message list -->
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5 mb-4 space-y-3 min-h-[300px] max-h-[55vh] overflow-y-auto">
+    <template x-if="loading">
+      <p class="text-center text-slate-500 py-10">Loading…</p>
+    </template>
+    <template x-if="!loading && messages.length===0">
+      <p class="text-center text-slate-500 py-10">No messages.</p>
+    </template>
+    <template x-for="m in messages" :key="m.id">
+      <div class="flex" :class="m.direction==='out' ? 'justify-end' : 'justify-start'">
+        <div class="max-w-[75%] rounded-2xl px-4 py-2"
+             :class="m.direction==='out' ? 'bg-brand-500/20 border border-brand-500/30' : 'bg-ink-700 border border-ink-600'">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-xs font-medium"
+                  :class="m.direction==='out' ? 'text-brand-300' : 'text-emerald-400'"
+                  x-text="m.direction==='out' ? ('→ '+m.number) : ('← '+m.number)"></span>
+            <span x-show="m.unread" class="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">new</span>
+          </div>
+          <p class="text-sm whitespace-pre-wrap break-words" x-text="m.text"></p>
+          <p class="text-[10px] text-slate-500 mt-1" x-text="m.date"></p>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- send form -->
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+    <p class="text-xs font-medium text-slate-400 mb-3">Send SMS</p>
+    <div class="flex flex-col gap-2">
+      <input x-model="toNumber" type="text" placeholder="Number (e.g. +39...)"
+             class="bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm">
+      <textarea x-model="toText" rows="3" placeholder="Message…"
+                class="bg-ink-700 border border-ink-600 rounded-lg px-3 py-2 text-sm"></textarea>
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-slate-500" x-text="toText.length + ' chars'"></span>
+        <button @click="send()" :disabled="busy||!toNumber||!toText"
+                class="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white text-sm font-medium">Send</button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- toast -->
+  <div x-show="toast" x-cloak x-transition style="display:none"
+       class="fixed bottom-5 right-5 z-50 bg-ink-700 border border-ink-600 rounded-xl px-4 py-3 text-sm shadow-xl">
+    <span x-text="toast"></span>
+  </div>
+</div>
+
+<script>
+function sms(){
+  return {
+    imei: {{ (modems[0].imei if modems else '') | tojson }},
+    messages: [], loading:false, busy:false, toast:'',
+    toNumber:'', toText:'', _timer:null,
+    init(){ if(this.imei){ this.load(); this._timer=setInterval(()=>this.load(true), 20000); } },
+    notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2800); },
+    async load(silent){
+      if(!this.imei) return;
+      if(!silent) this.loading=true;
+      try{
+        const r=await fetch(`/api/modems/${this.imei}/sms`);
+        if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText);
+        const d=await r.json();
+        this.messages=d.messages||[];
+      }catch(e){ if(!silent) this.notify('Error: '+e.message); }
+      finally{ this.loading=false; }
+    },
+    async send(){
+      if(!this.toNumber||!this.toText) return;
+      this.busy=true; this.notify('Sending…');
+      try{
+        const r=await fetch(`/api/modems/${this.imei}/sms`,{
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({number:this.toNumber, text:this.toText})});
+        if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.statusText);
+        this.toText=''; this.notify('Sent ✓');
+        setTimeout(()=>this.load(true), 1500);
+      }catch(e){ this.notify('Send failed: '+e.message); }
+      finally{ this.busy=false; }
+    },
+  }
+}
+</script>
+{% endblock %}

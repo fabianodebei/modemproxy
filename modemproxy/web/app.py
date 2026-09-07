@@ -23,7 +23,7 @@ from .. import db
 from ..config import get_config
 import random
 
-from ..modems import control, manager
+from ..modems import control, manager, netdev
 from ..proxy import generator
 from ..services import bandwidth, metrics, openvpn, quota, tests
 
@@ -187,6 +187,16 @@ def bandwidth_page(request: Request, user: str = Depends(ui_auth)):
         request, "bandwidth.html",
         {"user": user, "modems": db.list_modems(),
          "bw": bandwidth.report()},
+    )
+
+
+@app.get("/sms", response_class=HTMLResponse)
+def sms_page(request: Request, user: str = Depends(ui_auth)):
+    # Only ZTE net-mode modems expose an SMS API (Deco has none).
+    modems = [m for m in db.list_modems()
+              if m.get("kind") == "netdev" and "deco" not in (m.get("model") or "").lower()]
+    return templates.TemplateResponse(
+        request, "sms.html", {"user": user, "modems": modems},
     )
 
 
@@ -405,6 +415,36 @@ async def api_ussd(imei: str, request: Request, _: str = Depends(api_auth)):
         return {"imei": imei, "response": manager.send_ussd(imei, code)}
     except control.MMError as e:
         raise HTTPException(503, str(e))
+
+
+@app.get("/api/modems/{imei}/sms")
+def api_sms_list(imei: str, _: str = Depends(api_auth)):
+    m = db.get_modem(imei)
+    if not m:
+        raise HTTPException(404, "modem not found")
+    try:
+        return {"imei": imei, "messages": netdev.sms_list(m)}
+    except netdev.NetdevError as e:
+        raise HTTPException(503, str(e))
+
+
+@app.post("/api/modems/{imei}/sms")
+async def api_sms_send(imei: str, request: Request, _: str = Depends(api_auth)):
+    m = db.get_modem(imei)
+    if not m:
+        raise HTTPException(404, "modem not found")
+    body = await request.json() or {}
+    number = (body.get("number") or "").strip()
+    text = body.get("text") or ""
+    if not number or not text:
+        raise HTTPException(400, "number and text required")
+    try:
+        ok = netdev.sms_send(m, number, text)
+    except netdev.NetdevError as e:
+        raise HTTPException(503, str(e))
+    if not ok:
+        raise HTTPException(502, "send failed")
+    return {"imei": imei, "ok": True}
 
 
 @app.post("/api/modems/{imei}/conn-test")
