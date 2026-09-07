@@ -82,6 +82,36 @@ def test_rotation_hook_bad_token(client):
     assert client.get("/hook/rotate/bad").status_code == 404
 
 
+def test_rotation_hook_returns_before_slow_rotation_ends(client, modem, monkeypatch):
+    import threading
+    import time
+    from modemproxy.web import app as web_app
+    from modemproxy.modems import manager
+    from modemproxy import db
+
+    token = db.get_port(modem)["rotation_token"]
+    started = threading.Event()
+
+    def slow_rotate(imei, reason="manual"):
+        started.set()
+        time.sleep(1.0)
+        return {"imei": imei, "new_ip": "1.2.3.4"}
+
+    monkeypatch.setattr(manager, "rotate", slow_rotate)
+    monkeypatch.setattr(web_app, "HOOK_WAIT_SECONDS", 0.2)
+    t0 = time.monotonic()
+    r = client.get(f"/hook/rotate/{token}")
+    assert time.monotonic() - t0 < 0.9
+    assert r.status_code == 200
+    assert r.json()["status"] == "rotating" and r.json()["imei"] == modem
+    assert started.is_set()
+
+    # fast rotation -> full result returned
+    monkeypatch.setattr(manager, "rotate", lambda imei, reason="manual": {"imei": imei, "new_ip": "5.6.7.8"})
+    r = client.get(f"/hook/rotate/{token}")
+    assert r.status_code == 200 and r.json()["new_ip"] == "5.6.7.8"
+
+
 def test_api_key_auth_flow(client, modem):
     # create a key via admin basic auth
     r = client.post("/api/keys", headers=AUTH, json={"label": "scraper"})

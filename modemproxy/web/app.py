@@ -715,16 +715,38 @@ async def api_pool_rotating_set(request: Request, _: str = Depends(admin_auth)):
 
 # Public rotation hook — token-authenticated, no session. Lets external tools
 # rotate a single proxy's IP by hitting a secret URL (link rotation).
+# Callers such as the Proxybet browser extension abort after ~15 s, while a
+# rotation can take 20-60 s (Deco reboots). Wait a bit for the result; if the
+# modem is still busy answer 200 {"status": "rotating"} and let it finish.
+HOOK_WAIT_SECONDS = 10.0
+
+
 @app.get("/hook/rotate/{token}")
 @app.post("/hook/rotate/{token}")
 def rotation_hook(token: str):
+    import threading
+
     port = db.get_port_by_token(token)
     if not port:
         raise HTTPException(404, "invalid token")
-    try:
-        return manager.rotate(port["imei"], reason="hook")
-    except control.MMError as e:
-        raise HTTPException(503, str(e))
+    imei = port["imei"]
+    box: dict = {}
+
+    def run():
+        try:
+            box["result"] = manager.rotate(imei, reason="hook")
+        except Exception as e:  # noqa: BLE001 - reported to the caller below
+            box["error"] = e
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(HOOK_WAIT_SECONDS)
+    if t.is_alive():
+        return {"status": "rotating", "imei": imei}
+    if "error" in box:
+        err = box["error"]
+        raise HTTPException(503 if isinstance(err, control.MMError) else 500, str(err))
+    return box["result"]
 
 
 @app.get("/api/bandwidth")
