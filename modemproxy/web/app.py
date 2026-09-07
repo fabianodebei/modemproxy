@@ -218,7 +218,9 @@ async def router_proxy(imei: str, path: str, request: Request,
     host = m.get("mgmt_host") if m else None
     if not host:
         raise HTTPException(404, "modem not found")
-    binder = m.get("bind_ip") if m.get("manual") else m.get("iface")
+    # Source-IP bind is reliable for every net-mode modem (macvlan or dongle);
+    # SO_BINDTODEVICE onto the iface name is flaky, so prefer the bind IP.
+    binder = m.get("bind_ip") or m.get("iface")
     prefix = f"/router/{imei}/"
 
     target = f"http://{host}/{path}"
@@ -266,11 +268,25 @@ async def router_proxy(imei: str, path: str, request: Request,
     if "text/html" in ctype:
         html = payload.decode("utf-8", "replace")
         html = html.replace(f"http://{host}/", prefix)
-        base_tag = f'<base href="{prefix}">'
+        # <base> fixes relative assets; the shim rewrites absolute-path AJAX
+        # (e.g. /i18n/*.json, /goform/*) that <base> can't touch, so routers
+        # whose JS uses absolute URLs (untranslated {{...}} otherwise) work too.
+        inject = (
+            f'<base href="{prefix}">'
+            '<script>(function(){var P=' + repr(prefix) + ';'
+            'function fix(u){try{if(typeof u==="string"&&u.charAt(0)==="/"'
+            '&&u.substr(0,2)!=="//"&&u.indexOf(P)!==0){return P+u.replace(/^\\/+/,"");}}'
+            'catch(e){}return u;}'
+            'var O=XMLHttpRequest.prototype.open;'
+            'XMLHttpRequest.prototype.open=function(){arguments[1]=fix(arguments[1]);'
+            'return O.apply(this,arguments);};'
+            'if(window.fetch){var F=window.fetch;window.fetch=function(u,o){'
+            'return F.call(this,fix(u),o);};}})();</script>'
+        )
         if re.search(r"<head[^>]*>", html, re.I):
-            html = re.sub(r"(<head[^>]*>)", r"\1" + base_tag, html, count=1, flags=re.I)
+            html = re.sub(r"(<head[^>]*>)", r"\1" + inject, html, count=1, flags=re.I)
         else:
-            html = base_tag + html
+            html = inject + html
         payload = html.encode("utf-8")
     return Response(content=payload, status_code=code, media_type=ctype,
                     headers=out_headers)
