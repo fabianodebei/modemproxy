@@ -268,11 +268,16 @@ async def router_proxy(imei: str, path: str, request: Request,
     if "text/html" in ctype:
         html = payload.decode("utf-8", "replace")
         html = html.replace(f"http://{host}/", prefix)
+        # <base> must match the CURRENT page's directory, not the router root:
+        # some firmwares serve the real UI from a subfolder (home/index.html),
+        # whose relative assets would otherwise resolve one level too high.
+        sub = path.rsplit("/", 1)[0] if "/" in path else ""
+        base_href = prefix + (sub + "/" if sub else "")
         # <base> fixes relative assets; the shim rewrites absolute-path AJAX
         # (e.g. /i18n/*.json, /goform/*) that <base> can't touch, so routers
         # whose JS uses absolute URLs (untranslated {{...}} otherwise) work too.
         inject = (
-            f'<base href="{prefix}">'
+            f'<base href="{base_href}">'
             '<script>(function(){var P=' + repr(prefix) + ';'
             'function fix(u){try{if(typeof u==="string"&&u.charAt(0)==="/"'
             '&&u.substr(0,2)!=="//"&&u.indexOf(P)!==0){return P+u.replace(/^\\/+/,"");}}'
