@@ -105,3 +105,24 @@ def speedtest_upload(imei: str, timeout: int = 20) -> dict:
     return {"imei": imei, "ok": True, "bytes": int(size),
             "mbps": round(speed_bps * 8 / 1_000_000, 2), "seconds": round(secs, 2),
             "partial": out.returncode == 28}
+
+
+def latency(imei: str, host: str = "1.1.1.1", timeout: int = 5) -> dict:
+    """Round-trip estimate through this modem: TCP connect time to host:443
+    (no ICMP needed; excludes TLS and HTTP so it is close to a ping)."""
+    iface = _binder(imei)
+    try:
+        out = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "--max-time", str(timeout),
+             "--interface", iface, "-w", "%{time_connect}", f"https://{host}/"],
+            capture_output=True, text=True, timeout=timeout + 3,
+        )
+    except subprocess.TimeoutExpired:
+        return {"imei": imei, "ok": False, "error": "timeout"}
+    try:
+        t = float(out.stdout.strip())
+    except ValueError:
+        return {"imei": imei, "ok": False, "error": out.stderr.strip() or "failed"}
+    if t <= 0:
+        return {"imei": imei, "ok": False, "error": "no connection"}
+    return {"imei": imei, "ok": True, "ms": round(t * 1000)}

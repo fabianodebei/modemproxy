@@ -362,10 +362,10 @@ def speedtest(arg: str | None = None, _: str = Depends(compat_auth)):
     if not r.get("ok"):
         raise HTTPException(502, r.get("error") or "speedtest failed")
     u = tests.speedtest_upload(m["imei"])
-    c = tests.conn_test(m["imei"])
+    lat = tests.latency(m["imei"])
     return {"download": f"{r['mbps']} mbps",
             "upload": f"{u['mbps']} mbps" if u.get("ok") else "N/A",
-            "ping": f"{c.get('latency_ms', 'N/A')} ms" if c.get("ok") else "N/A"}
+            "ping": f"{lat['ms']} ms" if lat.get("ok") else "N/A"}
 
 
 def _human(n: int | float) -> str:

@@ -176,7 +176,7 @@ def test_speedtest_reports_download_upload_ping(client, auth, modem, monkeypatch
     from modemproxy.services import tests as svc
     monkeypatch.setattr(svc, "speedtest", lambda imei, timeout=30: {"ok": True, "mbps": 12.5})
     monkeypatch.setattr(svc, "speedtest_upload", lambda imei, timeout=30: {"ok": True, "mbps": 3.25})
-    monkeypatch.setattr(svc, "conn_test", lambda imei, timeout=15: {"ok": True, "latency_ms": 41})
+    monkeypatch.setattr(svc, "latency", lambda imei, host="1.1.1.1", timeout=5: {"ok": True, "ms": 41})
     r = client.get("/apix/speedtest", params={"arg": modem}, auth=auth)
     assert r.status_code == 200
     assert r.json() == {"download": "12.5 mbps", "upload": "3.25 mbps", "ping": "41 ms"}
