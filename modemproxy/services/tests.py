@@ -16,7 +16,7 @@ IP_ECHO_URL = "https://api.ipify.org"
 # ~10 MB sample served over HTTPS; small enough to be quick, big enough to measure.
 SPEEDTEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000"
 SPEEDTEST_UP_URL = "https://speed.cloudflare.com/__up"
-SPEEDTEST_UP_BYTES = 5_000_000
+SPEEDTEST_UP_BYTES = 2_000_000
 
 
 def _binder(imei: str) -> str:
@@ -72,9 +72,11 @@ def speedtest(imei: str, timeout: int = 30) -> dict:
     }
 
 
-def speedtest_upload(imei: str, timeout: int = 30) -> dict:
+def speedtest_upload(imei: str, timeout: int = 20) -> dict:
     """Measure upload throughput through this modem (Mbps): POST a zero-filled
-    body to the speed endpoint and read curl's speed_upload."""
+    body to the speed endpoint and read curl's speed_upload. Mobile uplinks can
+    be well under 1 Mbit/s, so a run that hits the time limit still counts:
+    curl reports the bytes sent and the average speed so far."""
     import os
     import tempfile
     iface = _binder(imei)
@@ -92,8 +94,14 @@ def speedtest_upload(imei: str, timeout: int = 30) -> dict:
         )
     except subprocess.TimeoutExpired:
         return {"imei": imei, "ok": False, "error": "timeout"}
-    if out.returncode != 0 or not out.stdout.strip():
+    parts = out.stdout.split()
+    if len(parts) != 3:
         return {"imei": imei, "ok": False, "error": out.stderr.strip() or "failed"}
-    size, speed_bps, secs = (float(x) for x in out.stdout.split())
+    size, speed_bps, secs = (float(x) for x in parts)
+    if size <= 0:                      # nothing left the box at all
+        return {"imei": imei, "ok": False, "error": out.stderr.strip() or "no bytes sent"}
+    if out.returncode == 28 and secs > 0:      # time limit hit: average so far
+        speed_bps = size / secs
     return {"imei": imei, "ok": True, "bytes": int(size),
-            "mbps": round(speed_bps * 8 / 1_000_000, 2), "seconds": round(secs, 2)}
+            "mbps": round(speed_bps * 8 / 1_000_000, 2), "seconds": round(secs, 2),
+            "partial": out.returncode == 28}
