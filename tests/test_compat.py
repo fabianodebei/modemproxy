@@ -140,8 +140,11 @@ def test_bandwidth_and_stubs(client, auth, modem):
     r = client.get("/apix/bandwidth_report_all", auth=auth)
     assert r.status_code == 200
     body = r.json()
-    assert body["ports"][0]["IMEI"] == modem and "today" in body["total"]
-    assert client.get("/apix/get_counters_port", params={"PORTID": modem}, auth=auth).json()["portID"] == modem
+    assert body[modem]["IMEI"] == modem and "today" in body[modem]
+    # proxysmart-style strings Proxybet parses ("12.3 MB")
+    assert body[modem]["bandwidth_bytes_month_in"].endswith((" KB", " MB", " GB", " TB"))
+    one = client.get("/apix/get_counters_port", params={"PORTID": modem}, auth=auth).json()
+    assert one["portID"] == modem and "bandwidth_bytes_day_out" in one
     assert client.get("/apix/unique_ips_json", auth=auth).json()[0]["ips"] == ["79.30.11.2"]
     assert client.get("/apix/get_rotation_log", params={"arg": modem}, auth=auth).json() == []
     assert client.get("/apix/get_free_tcp_ports", auth=auth).json() == []
@@ -167,3 +170,20 @@ def test_reset_refused_for_excluded_modem(client, modem, auth, monkeypatch):
         assert r.status_code == 403 and called == []
     finally:
         update_config({"rotation_hook_exclude": []})
+
+
+def test_speedtest_reports_download_upload_ping(client, auth, modem, monkeypatch):
+    from modemproxy.services import tests as svc
+    monkeypatch.setattr(svc, "speedtest", lambda imei, timeout=30: {"ok": True, "mbps": 12.5})
+    monkeypatch.setattr(svc, "speedtest_upload", lambda imei, timeout=30: {"ok": True, "mbps": 3.25})
+    monkeypatch.setattr(svc, "conn_test", lambda imei, timeout=15: {"ok": True, "latency_ms": 41})
+    r = client.get("/apix/speedtest", params={"arg": modem}, auth=auth)
+    assert r.status_code == 200
+    assert r.json() == {"download": "12.5 mbps", "upload": "3.25 mbps", "ping": "41 ms"}
+
+
+def test_human_sizes():
+    from modemproxy.web.compat import _human
+    assert _human(0) == "0.0 KB"
+    assert _human(254 * 1024 * 1024) == "254.0 MB"
+    assert _human(3.7 * 1024 ** 3) == "3.7 GB"

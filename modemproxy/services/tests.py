@@ -15,6 +15,8 @@ from .. import db
 IP_ECHO_URL = "https://api.ipify.org"
 # ~10 MB sample served over HTTPS; small enough to be quick, big enough to measure.
 SPEEDTEST_URL = "https://speed.cloudflare.com/__down?bytes=10000000"
+SPEEDTEST_UP_URL = "https://speed.cloudflare.com/__up"
+SPEEDTEST_UP_BYTES = 5_000_000
 
 
 def _binder(imei: str) -> str:
@@ -68,3 +70,30 @@ def speedtest(imei: str, timeout: int = 30) -> dict:
         "mbps": round(speed_bps * 8 / 1_000_000, 2),
         "seconds": round(secs, 2),
     }
+
+
+def speedtest_upload(imei: str, timeout: int = 30) -> dict:
+    """Measure upload throughput through this modem (Mbps): POST a zero-filled
+    body to the speed endpoint and read curl's speed_upload."""
+    import os
+    import tempfile
+    iface = _binder(imei)
+    blob = os.path.join(tempfile.gettempdir(), f"modemproxy-up-{SPEEDTEST_UP_BYTES}.bin")
+    if not os.path.exists(blob) or os.path.getsize(blob) != SPEEDTEST_UP_BYTES:
+        with open(blob, "wb") as f:
+            f.write(b"\0" * SPEEDTEST_UP_BYTES)
+    try:
+        out = subprocess.run(
+            ["curl", "-s", "-o", "/dev/null", "--max-time", str(timeout),
+             "--interface", iface, "-X", "POST", "--data-binary", f"@{blob}",
+             "-H", "Content-Type: application/octet-stream",
+             "-w", "%{size_upload} %{speed_upload} %{time_total}", SPEEDTEST_UP_URL],
+            capture_output=True, text=True, timeout=timeout + 5,
+        )
+    except subprocess.TimeoutExpired:
+        return {"imei": imei, "ok": False, "error": "timeout"}
+    if out.returncode != 0 or not out.stdout.strip():
+        return {"imei": imei, "ok": False, "error": out.stderr.strip() or "failed"}
+    size, speed_bps, secs = (float(x) for x in out.stdout.split())
+    return {"imei": imei, "ok": True, "bytes": int(size),
+            "mbps": round(speed_bps * 8 / 1_000_000, 2), "seconds": round(secs, 2)}

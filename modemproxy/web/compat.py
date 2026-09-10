@@ -359,26 +359,42 @@ async def modem_settings(request: Request, _: str = Depends(compat_auth)):
 def speedtest(arg: str | None = None, _: str = Depends(compat_auth)):
     m = _resolve(arg)
     r = tests.speedtest(m["imei"])
-    c = tests.conn_test(m["imei"])
     if not r.get("ok"):
         raise HTTPException(502, r.get("error") or "speedtest failed")
-    return {"download": f"{r['mbps']} mbps", "upload": "0 mbps",
+    u = tests.speedtest_upload(m["imei"])
+    c = tests.conn_test(m["imei"])
+    return {"download": f"{r['mbps']} mbps",
+            "upload": f"{u['mbps']} mbps" if u.get("ok") else "N/A",
             "ping": f"{c.get('latency_ms', 'N/A')} ms" if c.get("ok") else "N/A"}
 
 
+def _human(n: int | float) -> str:
+    """proxysmart-style size string ("254.0 MB"); Proxybet parses KB/MB/GB/TB."""
+    n = float(n or 0)
+    for unit in ("KB", "MB", "GB", "TB"):
+        n /= 1024.0
+        if n < 1024 or unit == "TB":
+            return f"{n:.1f} {unit}"
+    return f"{n:.1f} TB"
+
+
 def _bw_entry(m: dict) -> dict:
+    """One port's counters. Numeric bytes (day_in, month_out, ...) plus the
+    proxysmart-style strings Proxybet parses: bandwidth_bytes_<window>_<dir>
+    = "254.0 MB". "in" = downloaded through the modem, "out" = uploaded."""
     rep = bandwidth.report(m["imei"])
+    strings = {f"bandwidth_bytes_{k}": _human(v) for k, v in rep.items()}
     return {"IMEI": m["imei"], "portID": m["imei"], "portName": m.get("name") or m["imei"],
-            **rep, "today": rep["day_in"] + rep["day_out"],
+            **rep, **strings,
+            "today": rep["day_in"] + rep["day_out"],
             "month": rep["month_in"] + rep["month_out"]}
 
 
 @router.get("/apix/bandwidth_report_all")
 def bandwidth_report_all(_: str = Depends(compat_auth)):
-    rows = [_bw_entry(m) for m in db.list_modems()]
-    tot = bandwidth.report()
-    return {"ports": rows, "total": {**tot, "today": tot["day_in"] + tot["day_out"],
-                                     "month": tot["month_in"] + tot["month_out"]}}
+    """proxysmart shape: an object keyed by portID (Proxybet's Analytics page
+    does Object.entries() on it and reads bandwidth_bytes_*)."""
+    return {m["imei"]: _bw_entry(m) for m in db.list_modems()}
 
 
 @router.get("/apix/bandwidth_report_json")
