@@ -7,6 +7,7 @@ either the session cookie or HTTP basic auth.
 from __future__ import annotations
 
 import base64
+import re
 import logging
 import secrets
 import subprocess
@@ -222,8 +223,34 @@ def sms_page(request: Request, user: str = Depends(ui_auth)):
 ROUTER_COOKIE = "mp_router"
 
 
+def _router_cookie_prefix(imei: str) -> str:
+    """Per-router namespace for the device's cookies on the panel origin."""
+    return "mpr_" + re.sub(r"[^A-Za-z0-9]", "_", imei) + "__"
+
+
+def _cookies_for_router(cookie_header: str | None, prefix: str) -> str:
+    """Browser Cookie header -> the cookies that belong to THIS router, with
+    the namespace stripped (panel cookies and other routers' cookies dropped).
+    Without this every ZTE UI wrote the same `stok` cookie on our origin, so a
+    second router's login (or its login page) clobbered the first one's
+    session and the user was thrown out a few seconds after logging in."""
+    out = []
+    for part in (cookie_header or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name.startswith(prefix):
+            out.append(f"{name[len(prefix):]}={value}")
+    return "; ".join(out)
+
+
+def _namespace_set_cookie(value: str, prefix: str) -> str:
+    """Router Set-Cookie -> same cookie under this router's namespace."""
+    name, sep, rest = value.partition("=")
+    return f"{prefix}{name.strip()}{sep}{rest}" if sep else value
+
+
 async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
     host = m["mgmt_host"]
+    prefix = _router_cookie_prefix(m["imei"])
     # Source-IP bind is reliable for every net-mode modem (macvlan or dongle);
     # SO_BINDTODEVICE onto the iface name is flaky, so prefer the bind IP.
     binder = m.get("bind_ip") or m.get("iface")
@@ -233,7 +260,7 @@ async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
     args = ["curl", "-s", "-i", "--compressed", "--max-time", "25"]
     if binder:
         args += ["--interface", binder]
-    if ck := request.headers.get("cookie"):
+    if ck := _cookies_for_router(request.headers.get("cookie"), prefix):
         args += ["-H", f"Cookie: {ck}"]
     args += ["-H", f"Referer: http://{host}/", "-H", "X-Requested-With: XMLHttpRequest"]
     body = b""
@@ -255,7 +282,7 @@ async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
         code = int(lines[0].split()[1])
     except (IndexError, ValueError):
         code = 200
-    ctype, out_headers = "application/octet-stream", {}
+    ctype, out_headers, set_cookies = "application/octet-stream", {}, []
     for ln in lines[1:]:
         k, _, v = ln.partition(":")
         k, v = k.strip().lower(), v.strip()
@@ -267,7 +294,7 @@ async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
                 v = "/" + v[len(f"http://{host}/"):]
             out_headers["location"] = v
         elif k == "set-cookie":
-            out_headers["set-cookie"] = v
+            set_cookies.append(_namespace_set_cookie(v, prefix))
     # The "livebox" firmware's main.js reloads the page whenever document.cookie
     # is non-empty (after a cookie wipe that uses an invalid domain=host:port and
     # so never succeeds). On the device's own IP there are no JS-visible cookies;
@@ -275,8 +302,11 @@ async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
     # turns it into an infinite reload loop. Neutralise that one check.
     if "javascript" in ctype or path.endswith(".js"):
         payload = payload.replace(b'if (document.cookie != "" &&', b'if (false &&')
-    return Response(content=payload, status_code=code, media_type=ctype,
+    resp = Response(content=payload, status_code=code, media_type=ctype,
                     headers=out_headers)
+    for sc in set_cookies:                 # keep EVERY Set-Cookie, not just the last
+        resp.headers.append("set-cookie", sc)
+    return resp
 
 
 @app.get("/router/{imei}")

@@ -152,3 +152,15 @@ def test_rotation_hook_excluded_modem(client, modem, monkeypatch):
     finally:
         update_config({"rotation_hook_exclude": []})
         assert get_config().rotation_hook_exclude == []
+
+
+def test_router_cookies_are_namespaced_per_modem():
+    from modemproxy.web.app import (_cookies_for_router, _namespace_set_cookie,
+                                    _router_cookie_prefix)
+    p1, p2 = _router_cookie_prefix("net-mp1"), _router_cookie_prefix("net-mp2")
+    assert p1 != p2 and p1.startswith("mpr_")
+    hdr = f"modemproxy_session=abc; mp_router=net-mp1; {p1}stok=\"AAA\"; {p2}stok=\"BBB\"; {p1}lang=it"
+    assert _cookies_for_router(hdr, p1) == 'stok="AAA"; lang=it'
+    assert _cookies_for_router(hdr, p2) == 'stok="BBB"'
+    assert _cookies_for_router(None, p1) == ""
+    assert _namespace_set_cookie('stok="CCC";path=/;HttpOnly', p1) == f'{p1}stok="CCC";path=/;HttpOnly'
