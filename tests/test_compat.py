@@ -199,3 +199,10 @@ def test_modem_status_exposes_radio_metrics():
     assert nd["RSRP"] == "-105" and nd["RSRQ"] == "-12" and nd["SINR"] == "4.8"
     assert nd["NR_RSRP"] == "-109" and nd["BAND"] == "LTE BAND 3"
     assert "RSSI" not in nd
+
+
+def test_offline_modem_status_never_contains_connected():
+    from modemproxy.web import compat
+    nd = compat._modem_status({"imei": "net-x", "status": "offline"})["net_details"]
+    assert nd["IS_ONLINE"] == "no"
+    assert "connected" not in nd["ConnectionStatus"]   # Proxybet uses includes()

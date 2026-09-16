@@ -120,7 +120,9 @@ def _modem_status(m: dict) -> dict:
         "net_details": {
             "SimStatus": "ready",
             "IS_ONLINE": "yes" if online else "no",
-            "ConnectionStatus": "connected" if online else "disconnected",
+            # Proxybet tests ConnectionStatus.includes("connected"), which "disconnected"
+            # also matches: an offline modem showed as online. Never contain that word.
+            "ConnectionStatus": "connected" if online else "offline",
             # proxysmart reports 0-5 bars; Proxybet multiplies by 20.
             "SIGNAL_STRENGTH": str(max(0, min(5, round(sig / 20)))),
             "CurrentNetworkType": rat,
