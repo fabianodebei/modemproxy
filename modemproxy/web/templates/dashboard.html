@@ -73,6 +73,14 @@
                 </div>
                 <span class="text-xs text-slate-400" x-text="(m.signal||0)+'%'"></span>
               </div>
+              <template x-for="row in radioRows(m)" :key="row.label">
+                <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-mono whitespace-nowrap">
+                  <span class="text-slate-500 font-sans" x-text="row.label"></span>
+                  <template x-for="c in row.cells" :key="c.k">
+                    <span :class="c.cls" :title="c.title"><span class="text-slate-500" x-text="c.k"></span> <span x-text="c.v"></span></span>
+                  </template>
+                </div>
+              </template>
             </td>
             <td class="px-5 py-3 font-mono text-xs">
               <template x-if="m.http_port">
@@ -332,6 +340,29 @@ function dashboard(){
     async refresh(){ this.modems=await this.api('GET','/api/modems');
       if(this.selected){ this.selected=this.modems.find(m=>m.imei===this.selected.imei)||null; } },
     async discover(){ await this.api('POST','/api/discover'); await this.refresh(); this.notify('Discovery complete'); },
+    // Thresholds: RSRP ≥-90 ottimo, ≥-100 buono, ≥-110 sufficiente, else scarso;
+    // RSRQ ≥-10 ottimo, ≥-15 accettabile, else scadente; SINR ≥13 ottimo, ≥0 medio.
+    radioRows(m){
+      let r; try{ r=JSON.parse(m.radio||'null'); }catch(e){ r=null; }
+      if(!r) return [];
+      const G='text-emerald-400', Y='text-lime-400', A='text-amber-400', R='text-red-400', N='text-slate-300';
+      const grade={
+        RSRP:v=>v>=-90?[G,'ottimo']:v>=-100?[Y,'buono']:v>=-110?[A,'sufficiente']:[R,'scarso'],
+        RSRQ:v=>v>=-10?[G,'ottimo']:v>=-15?[A,'accettabile']:[R,'scadente (interferenza)'],
+        SINR:v=>v>=13?[G,'ottimo']:v>=0?[A,'medio']:[R,'scarso'],
+        RSSI:v=>[N,'potenza totale (indicativa)'],
+      };
+      const unit={RSRP:' dBm',RSRQ:' dB',SINR:' dB',RSSI:' dBm'};
+      const row=(label,p,band)=>{
+        const cells=['RSRP','RSRQ','SINR','RSSI'].filter(k=>r[p+k.toLowerCase()]!=null).map(k=>{
+          const v=r[p+k.toLowerCase()], [cls,q]=grade[k](v);
+          return {k, v, cls, title:`${k} ${v}${unit[k]} — ${q}`};
+        });
+        return cells.length ? {label:label+(band?` ${band}`:''), cells} : null;
+      };
+      const lteBand=(r.band||'').replace(/^LTE BAND\s*/i,'B');
+      return [row('4G','',lteBand), row('5G','nr_',r.nr_band)].filter(Boolean);
+    },
     effStatus(m){ return (m.http_port && !m.enabled) ? 'offline' : (m.status||'—'); },
     open(m){ this.selected=m; this.newPw=''; this.newName='';
       this.newInterval=m.rotation_interval||0;

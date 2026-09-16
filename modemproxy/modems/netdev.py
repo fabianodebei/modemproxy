@@ -211,6 +211,7 @@ def _refresh_dev(dev: dict[str, Any], table: int, *, manual: bool = False,
         model=model,
         ip=pub,
         signal=info.get("signal"),
+        radio=json.dumps(info["radio"]) if info.get("radio") else None,
         operator=info.get("operator"),
         status=status,
         manual=1 if manual else 0,
@@ -332,21 +333,71 @@ def device_status(host: str, iface: str | None = None) -> dict[str, Any]:
     return _status_zte(host, iface) or _status_huawei(host, iface) or {}
 
 
+# ZTE goform radio keys -> our keys. LTE anchor and 5G NR values are kept
+# apart: on NSA ("ENDC"/"LTE-NSA") both are live at the same time.
+_ZTE_RADIO = {"lte_rsrp": "rsrp", "lte_rsrq": "rsrq", "lte_snr": "sinr",
+              "lte_rssi": "rssi", "Z5g_rsrp": "nr_rsrp", "Z5g_rsrq": "nr_rsrq",
+              "Z5g_SINR": "nr_sinr", "Z5g_rssi": "nr_rssi"}
+_ZTE_RADIO_TEXT = {"network_type": "net", "wan_active_band": "band",
+                   "nr5g_action_band": "nr_band"}
+
+
+def _num(v: Any) -> float | int | None:
+    """'-105' -> -105, '4.8' -> 4.8, '' / 'dBm' junk -> None."""
+    m = re.search(r"-?\d+(?:\.\d+)?", str(v or ""))
+    if not m:
+        return None
+    f = float(m.group())
+    return int(f) if f.is_integer() else f
+
+
+def _zte_radio(d: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for src, dst in _ZTE_RADIO.items():
+        if (v := _num(d.get(src))) is not None:
+            out[dst] = v
+    if out:
+        for src, dst in _ZTE_RADIO_TEXT.items():
+            if d.get(src):
+                out[dst] = str(d[src])
+    return out
+
+
+def _zte_session_jar(host: str, iface: str | None) -> str:
+    """Persistent cookie jar so the status poll reuses one router session
+    instead of logging in every discovery cycle."""
+    from ..config import STATE_DIR
+    tag = re.sub(r"[^A-Za-z0-9]", "_", iface or host)
+    return str(STATE_DIR / f"zte-session-{tag}.cookies")
+
+
 def _status_zte(host: str, iface: str | None = None) -> dict[str, Any] | None:
-    """ZTE goform: signalbar (0-5), network_provider, network_type."""
+    """ZTE goform: signalbar (0-5), network_provider, radio metrics.
+
+    MF-series dongles answer RSRP/RSRQ/SINR anonymously; MC801A CPEs blank them
+    unless logged in, so we log in (reusing a persisted session) and ask again.
+    """
     url = (f"http://{host}/goform/goform_get_cmd_process"
-           "?isTest=false&multi_data=1"
-           "&cmd=signalbar,network_provider,network_type,rssi,rscp")
+           "?isTest=false&multi_data=1&cmd=signalbar,network_provider,"
+           + ",".join([*_ZTE_RADIO, *_ZTE_RADIO_TEXT]))
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
-    ok, text = _http(iface, url, headers=headers, timeout=5)
-    if not ok or not text:
+
+    def _get(cj: str | None) -> dict[str, Any] | None:
+        ok, text = _http(iface, url, headers=headers, cookies=cj, timeout=5)
+        if not ok or not text:
+            return None
+        try:
+            return json.loads(text)
+        except ValueError:
+            return None
+
+    cj = _zte_session_jar(host, iface)
+    d = _get(cj)
+    if d is None or ("signalbar" not in d and "network_provider" not in d):
         return None
-    try:
-        d = json.loads(text)
-    except ValueError:
-        return None
-    if "signalbar" not in d and "network_provider" not in d:
-        return None
+    if not _zte_radio(d) and get_config().default_hilink_password:
+        _zte_login(host, iface, cj)
+        d = _get(cj) or d
     out: dict[str, Any] = {}
     bars = d.get("signalbar")
     if bars not in (None, ""):
@@ -357,6 +408,8 @@ def _status_zte(host: str, iface: str | None = None) -> dict[str, Any] | None:
     op = d.get("network_provider")
     if op:
         out["operator"] = op
+    if radio := _zte_radio(d):
+        out["radio"] = radio
     return out or None
 
 
@@ -373,6 +426,14 @@ def _status_huawei(host: str, iface: str | None = None) -> dict[str, Any] | None
             out["signal"] = max(0, min(100, round((rsrp + 140) / 96 * 100)))
         except (ValueError, IndexError):
             pass
+    radio = {}
+    for tag in ("rsrp", "rsrq", "sinr", "rssi"):
+        if f"<{tag}>" in text:
+            v = _num(text.split(f"<{tag}>")[1].split(f"</{tag}>")[0])
+            if v is not None:
+                radio[tag] = v
+    if radio:
+        out["radio"] = radio
     ok2, plmn = _http(iface, f"http://{host}/api/net/current-plmn", timeout=5)
     if ok2 and "<FullName>" in plmn:
         out["operator"] = plmn.split("<FullName>")[1].split("</FullName>")[0]
@@ -520,6 +581,18 @@ def _status_deco(host: str) -> dict[str, Any]:
         out["operator"] = op
     elif rat:
         out["operator"] = rat
+    # Field names vary across Deco firmwares; take whatever radio values it has.
+    radio = {}
+    for k, v in cpe.items():
+        kl = k.lower()
+        key = next((t for t in ("rsrp", "rsrq", "sinr", "rssi") if t in kl), None)
+        if key is None and "snr" in kl:
+            key = "sinr"
+        if key and (n := _num(v)) is not None and n != 0:
+            nr = kl.startswith(("nr", "5g", "z5g")) or "_nr" in kl or "5g" in kl
+            radio.setdefault(("nr_" if nr else "") + key, n)
+    if radio:
+        out["radio"] = radio
     sig = cpe.get("signal_strength")
     if sig not in (None, ""):
         try:

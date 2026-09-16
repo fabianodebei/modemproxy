@@ -97,6 +97,18 @@ def _split_operator(op: str | None) -> tuple[str, str]:
     return op, ""
 
 
+def _radio_details(m: dict) -> dict:
+    """RSRP/RSRQ/SINR/RSSI (LTE + 5G NR) as net_details strings, when known."""
+    try:
+        r = json.loads(m.get("radio") or "null") or {}
+    except ValueError:
+        r = {}
+    keys = {"rsrp": "RSRP", "rsrq": "RSRQ", "sinr": "SINR", "rssi": "RSSI",
+            "band": "BAND", "nr_rsrp": "NR_RSRP", "nr_rsrq": "NR_RSRQ",
+            "nr_sinr": "NR_SINR", "nr_rssi": "NR_RSSI", "nr_band": "NR_BAND"}
+    return {out: str(r[k]) for k, out in keys.items() if r.get(k) is not None}
+
+
 def _modem_status(m: dict) -> dict:
     online = m.get("status") == "online"
     op, rat = _split_operator(m.get("operator"))
@@ -117,6 +129,7 @@ def _modem_status(m: dict) -> dict:
             "LOCAL_IP": m.get("bind_ip") or "",
             "WAN_IP": m.get("ip") or "",
             "GEO": m.get("geo") or "",
+            **_radio_details(m),
         },
         "MSGS": [],
     }

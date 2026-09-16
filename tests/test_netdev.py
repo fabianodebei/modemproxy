@@ -157,3 +157,33 @@ def test_rotate_netdev_uses_web_api(monkeypatch):
     assert db.get_modem(imei)["ip"] == "9.9.9.9"
     # rotation was logged
     assert db.rotation_log(imei)[0]["new_ip"] == "9.9.9.9"
+
+
+def test_status_zte_reads_radio_metrics_from_dongle(monkeypatch):
+    payload = ('{"signalbar": "3", "network_provider": "WINDTRE", "lte_rsrp": "-103", '
+               '"lte_rsrq": "-11", "lte_snr": "6.0", "lte_rssi": "-71", "Z5g_rsrp": "", '
+               '"network_type": "LTE", "wan_active_band": "LTE BAND 1", "nr5g_action_band": ""}')
+    logins = []
+    monkeypatch.setattr(netdev, "_http", lambda *a, **k: (True, payload))
+    monkeypatch.setattr(netdev, "_zte_login", lambda *a: logins.append(a))
+    info = netdev._status_zte("192.168.0.1", "modem251")
+    assert info["radio"] == {"rsrp": -103, "rsrq": -11, "sinr": 6, "rssi": -71,
+                             "net": "LTE", "band": "LTE BAND 1"}
+    assert logins == []                      # anonymous values: no login needed
+
+
+def test_status_zte_logs_in_when_cpe_hides_radio(monkeypatch):
+    hidden = '{"signalbar": "2", "network_provider": "TIM", "lte_rsrp": "", "Z5g_rsrp": ""}'
+    shown = ('{"signalbar": "2", "network_provider": "TIM", "lte_rsrp": "-105", '
+             '"Z5g_rsrp": "-109", "Z5g_SINR": "15.0", "nr5g_action_band": "n78"}')
+    state = {"logged": False}
+    monkeypatch.setattr(netdev, "_http",
+                        lambda *a, **k: (True, shown if state["logged"] else hidden))
+    monkeypatch.setattr(netdev, "_zte_login", lambda *a: state.update(logged=True))
+    monkeypatch.setattr(netdev, "get_config",
+                        lambda: type("C", (), {"default_hilink_password": "x"})())
+    info = netdev._status_zte("192.168.10.2")
+    assert state["logged"]
+    assert info["radio"]["rsrp"] == -105
+    assert info["radio"]["nr_rsrp"] == -109 and info["radio"]["nr_sinr"] == 15
+    assert info["radio"]["nr_band"] == "n78"

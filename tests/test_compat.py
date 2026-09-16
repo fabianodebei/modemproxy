@@ -187,3 +187,15 @@ def test_human_sizes():
     assert _human(0) == "0.0 KB"
     assert _human(254 * 1024 * 1024) == "254.0 MB"
     assert _human(3.7 * 1024 ** 3) == "3.7 GB"
+
+
+def test_modem_status_exposes_radio_metrics():
+    import json as _json
+    from modemproxy.web import compat
+    m = {"imei": "net-x", "status": "online", "signal": 60, "operator": "TIM",
+         "radio": _json.dumps({"rsrp": -105, "rsrq": -12, "sinr": 4.8, "nr_rsrp": -109,
+                               "band": "LTE BAND 3"})}
+    nd = compat._modem_status(m)["net_details"]
+    assert nd["RSRP"] == "-105" and nd["RSRQ"] == "-12" and nd["SINR"] == "4.8"
+    assert nd["NR_RSRP"] == "-109" and nd["BAND"] == "LTE BAND 3"
+    assert "RSSI" not in nd
