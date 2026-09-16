@@ -13,7 +13,12 @@
 {% endblock %}
 
 {% block main %}
-<div x-data="dashboard()" x-init="init()">
+<div x-data="dashboard()" x-init="init()" @click="tip=null">
+  <div x-show="tip" x-cloak class="fixed z-50 w-72 rounded-lg border border-ink-600 bg-ink-900 px-3 py-2 text-xs shadow-xl pointer-events-none"
+       :style="tip ? `left:${tip.x}px;top:${tip.y}px` : ''">
+    <div class="font-medium text-slate-100" x-text="tip && tip.head"></div>
+    <div class="mt-1 text-slate-400 whitespace-pre-line" x-text="tip && tip.text"></div>
+  </div>
 
   <!-- stat cards -->
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -77,7 +82,8 @@
                 <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-mono whitespace-nowrap">
                   <span class="text-slate-500 font-sans" x-text="row.label"></span>
                   <template x-for="c in row.cells" :key="c.k">
-                    <span :class="c.cls" :title="c.title"><span class="text-slate-500" x-text="c.k"></span> <span x-text="c.v"></span></span>
+                    <span :class="c.cls" class="cursor-help border-b border-dotted border-slate-600"
+                          @mouseenter="showTip($event,c)" @mouseleave="tip=null" @click.stop="showTip($event,c)"><span class="text-slate-500" x-text="c.k"></span> <span x-text="c.v"></span></span>
                   </template>
                 </div>
               </template>
@@ -318,6 +324,12 @@
 const SERVER_HOST = {{ (cfg.public_host or (cfg.bind_address if cfg.bind_address != '0.0.0.0' else request.url.hostname)) | tojson }};
 const HOOK_BASE = {{ (('https://' + cfg.public_host) if cfg.public_host else '') | tojson }};
 const HOOK_EXCLUDE = {{ cfg.rotation_hook_exclude | tojson }};
+const RADIO_HELP={
+  RSRP:'Potenza media del segnale ricevuto dal ripetitore.\nOttimo da -80 a -90 dBm · Buono da -90 a -100 · Sufficiente da -100 a -110 · Scarsa ricezione sotto -110.',
+  RSRQ:'Qualità del segnale, tiene conto di rumore e interferenze.\nOttimo da -3 a -10 dB · Accettabile da -10 a -15 · Scadente sotto -15 (forte interferenza).',
+  SINR:'Rapporto tra segnale utile e rumore di fondo.\nSopra 13 dB segnale pulito e veloce · da 0 a 13 medio · sotto 0 rumore elevato.',
+  RSSI:'Potenza totale ricevuta, rumore compreso.\nIndicativa: per il 4G/5G contano di più RSRP e RSRQ.',
+};
 function dashboard(){
   return {
     modems: {{ modems | tojson }},
@@ -342,6 +354,12 @@ function dashboard(){
     async discover(){ await this.api('POST','/api/discover'); await this.refresh(); this.notify('Discovery complete'); },
     // Thresholds: RSRP ≥-90 ottimo, ≥-100 buono, ≥-110 sufficiente, else scarso;
     // RSRQ ≥-10 ottimo, ≥-15 accettabile, else scadente; SINR ≥13 ottimo, ≥0 medio.
+    tip:null,
+    showTip(ev,c){
+      const r=ev.currentTarget.getBoundingClientRect();
+      const x=Math.max(8, Math.min(r.left, window.innerWidth-300));
+      this.tip={head:c.head, text:c.text, x, y:r.bottom+6};
+    },
     radioRows(m){
       let r; try{ r=JSON.parse(m.radio||'null'); }catch(e){ r=null; }
       if(!r) return [];
@@ -356,7 +374,7 @@ function dashboard(){
       const row=(label,p,band)=>{
         const cells=['RSRP','RSRQ','SINR','RSSI'].filter(k=>r[p+k.toLowerCase()]!=null).map(k=>{
           const v=r[p+k.toLowerCase()], [cls,q]=grade[k](v);
-          return {k, v, cls, title:`${k} ${v}${unit[k]} — ${q}`};
+          return {k, v, cls, head:`${k} ${v}${unit[k]} — ${q}`, text:RADIO_HELP[k]};
         });
         return cells.length ? {label:label+(band?` ${band}`:''), cells} : null;
       };
