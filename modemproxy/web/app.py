@@ -260,7 +260,16 @@ async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
     args = ["curl", "-s", "-i", "--compressed", "--max-time", "25"]
     if binder:
         args += ["--interface", binder]
-    if ck := _cookies_for_router(request.headers.get("cookie"), prefix):
+    # One login session per device, shared with modemproxy's own calls (SMS,
+    # rotation, signal poll): the ZTE firmware only honours the latest login, so
+    # separate sessions logged each other out (see netdev._zte_session).
+    from ..modems import netdev
+    jar = netdev.zte_session_jar_for(m)
+    ck = _cookies_for_router(request.headers.get("cookie"), prefix)
+    if shared := netdev.zte_session_cookie(jar):
+        others = [c for c in ck.split("; ") if c and not c.startswith("stok=")]
+        ck = "; ".join([*others, shared])
+    if ck:
         args += ["-H", f"Cookie: {ck}"]
     args += ["-H", f"Referer: http://{host}/", "-H", "X-Requested-With: XMLHttpRequest"]
     body = b""
@@ -295,6 +304,9 @@ async def _forward_to_router(m: dict, path: str, request: Request) -> Response:
             out_headers["location"] = v
         elif k == "set-cookie":
             set_cookies.append(_namespace_set_cookie(v, prefix))
+            if (request.method == "POST" and b"goformId=LOGIN" in body
+                    and b'"result":"0"' in payload.replace(b" ", b"")):
+                netdev.zte_adopt_session(jar, host, v)
     # The "livebox" firmware's main.js reloads the page whenever document.cookie
     # is non-empty (after a cookie wipe that uses an invalid domain=host:port and
     # so never succeeds). On the device's own IP there are no JS-visible cookies;

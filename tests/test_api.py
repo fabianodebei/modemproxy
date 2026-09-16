@@ -3,6 +3,7 @@ import base64
 import pytest
 from fastapi.testclient import TestClient
 
+from modemproxy import db
 from modemproxy.web.app import app
 
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"admin:testpass").decode()}
@@ -164,3 +165,42 @@ def test_router_cookies_are_namespaced_per_modem():
     assert _cookies_for_router(hdr, p2) == 'stok="BBB"'
     assert _cookies_for_router(None, p1) == ""
     assert _namespace_set_cookie('stok="CCC";path=/;HttpOnly', p1) == f'{p1}stok="CCC";path=/;HttpOnly'
+
+
+def test_router_proxy_shares_one_session_with_modemproxy(client, monkeypatch, tmp_path):
+    """ZTE firmware honours only the latest login, so the browser (via the
+    panel) and modemproxy must use the same stok: the browser's login is
+    adopted, and the shared stok is what gets sent to the router."""
+    import subprocess as sp
+    from modemproxy.modems import netdev
+    from modemproxy.web import app as webapp
+    db.upsert_modem("net-mp9", kind="netdev", manual=1, iface="mp9",
+                    mgmt_host="192.168.10.9", bind_ip="192.168.10.209")
+    jar = netdev.zte_session_jar_for(db.get_modem("net-mp9"))
+    sent = []
+
+    def fake_run(args, input=None, capture_output=True, timeout=None):
+        sent.append(args)
+        if input and b"goformId=LOGIN" in input:
+            out = (b'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n'
+                   b'Set-Cookie: stok="NEWSESSION";path=/;HttpOnly\r\n\r\n{"result":"0"}')
+        else:
+            out = b'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n{"loginfo":"ok"}'
+        return sp.CompletedProcess(args, 0, out, b"")
+
+    monkeypatch.setattr(webapp.subprocess, "run", fake_run)
+    app.dependency_overrides[webapp.ui_auth] = lambda: "admin"
+    try:
+        client.cookies.set("mp_router", "net-mp9")
+        client.cookies.set(webapp._router_cookie_prefix("net-mp9") + "stok", '"OLDBROWSER"')
+        r = client.post("/goform/goform_set_cmd_process",
+                        content=b"isTest=false&goformId=LOGIN&password=x",
+                        headers={"content-type": "application/x-www-form-urlencoded"})
+        assert r.status_code == 200
+        assert netdev.zte_session_cookie(jar) == 'stok="NEWSESSION"'   # adopted
+        client.get("/goform/goform_get_cmd_process?multi_data=1&cmd=loginfo")
+        cookie_hdr = [a[i + 1] for a in sent[-1:] for i, x in enumerate(a) if x == "-H"
+                      and a[i + 1].startswith("Cookie:")]
+        assert cookie_hdr == ['Cookie: stok="NEWSESSION"']              # shared, not the browser's
+    finally:
+        app.dependency_overrides.clear()

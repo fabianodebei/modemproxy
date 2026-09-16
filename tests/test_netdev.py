@@ -187,3 +187,48 @@ def test_status_zte_logs_in_when_cpe_hides_radio(monkeypatch):
     assert info["radio"]["rsrp"] == -105
     assert info["radio"]["nr_rsrp"] == -109 and info["radio"]["nr_sinr"] == 15
     assert info["radio"]["nr_band"] == "n78"
+
+
+def test_session_jar_keys_and_readonly_calls(monkeypatch):
+    # dongles sharing 192.168.0.1 get separate jars; LAN routers keyed by host
+    a = netdev._zte_session_jar("192.168.0.1", "modem74")
+    b = netdev._zte_session_jar("192.168.0.1", "modem251")
+    assert a != b
+    assert (netdev._zte_session_jar("192.168.10.2", None)
+            == netdev._zte_session_jar("192.168.10.2", "192.168.10.202"))
+    calls = []
+
+    class P:
+        returncode, stdout = 0, "{}"
+    monkeypatch.setattr(netdev.subprocess, "run", lambda args, **k: calls.append(args) or P())
+    netdev._http(None, "http://x/", cookies=a)                     # normal call: read only
+    netdev._http(None, "http://x/", cookies=a, save_cookies=True)  # login: writes
+    assert "-c" not in calls[0] and "-c" in calls[1]
+
+
+def test_zte_session_logs_in_only_when_session_is_not_current(monkeypatch):
+    logins = []
+    monkeypatch.setattr(netdev, "_zte_login", lambda *a: logins.append(a))
+    monkeypatch.setattr(netdev, "_http", lambda *a, **k: (True, '{"loginfo":"ok"}'))
+    netdev._zte_session("192.168.10.2", None)
+    assert logins == []
+    monkeypatch.setattr(netdev, "_http", lambda *a, **k: (True, '{"loginfo":""}'))
+    netdev._zte_session("192.168.10.2", None)
+    assert len(logins) == 1
+
+
+def test_adopt_session_roundtrip(tmp_path):
+    jar = str(tmp_path / "zte-session-x.cookies")
+    netdev.zte_adopt_session(jar, "192.168.10.2", 'stok="ABC";path=/;HttpOnly')
+    assert netdev.zte_session_cookie(jar) == 'stok="ABC"'
+    netdev.zte_adopt_session(jar, "192.168.10.2", 'lang=it;path=/')   # not a session cookie
+    assert netdev.zte_session_cookie(jar) == 'stok="ABC"'
+
+
+def test_zte_calls_to_lan_router_leave_from_its_bind_ip():
+    # the ZTE session is tied to the client IP: use the same source as the panel
+    db.upsert_modem("net-mp7", kind="netdev", manual=1, iface="mp7",
+                    mgmt_host="192.168.10.7", bind_ip="192.168.10.207")
+    assert netdev._zte_bind("192.168.10.7", None) == "192.168.10.207"
+    assert netdev._zte_bind("192.168.0.1", "modem74") == "modem74"
+    assert netdev._zte_bind("192.168.99.1", None) is None

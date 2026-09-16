@@ -13,7 +13,7 @@ def test_zte_login_uses_ld_hash(monkeypatch):
     posted = {}
 
     def fake_http(iface, url, *, method="GET", data=None, body=None,
-                  headers=None, cookies=None, timeout=8):
+                  headers=None, cookies=None, timeout=8, save_cookies=None):
         if "cmd=LD" in url:
             return True, '{"LD": "ABCD"}'
         if data and data.get("goformId") == "LOGIN":

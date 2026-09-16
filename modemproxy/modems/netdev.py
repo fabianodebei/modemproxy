@@ -298,7 +298,7 @@ def register_manual(iface: str, *, gateway: str | None = None,
 def _http(iface: str | None, url: str, *, method: str = "GET",
           data: dict[str, str] | None = None, body: str | None = None,
           headers: dict[str, str] | None = None, cookies: str | None = None,
-          timeout: int = 8) -> tuple[bool, str]:
+          timeout: int = 8, save_cookies: bool | None = None) -> tuple[bool, str]:
     """HTTP request via curl, optionally bound to a network interface.
 
     Two net-mode dongles frequently share the SAME gateway IP (e.g. two ZTE
@@ -311,7 +311,12 @@ def _http(iface: str | None, url: str, *, method: str = "GET",
     if iface:
         args += ["--interface", iface]
     if cookies:
-        args += ["-c", cookies, "-b", cookies]
+        args += ["-b", cookies]
+        # A shared ZTE session jar is only rewritten by the login: a slow call
+        # started before the panel adopted a newer session must not put the
+        # stale cookie back.
+        if save_cookies if save_cookies is not None else not _is_session_jar(cookies):
+            args += ["-c", cookies]
     for k, v in (headers or {}).items():
         args += ["-H", f"{k}: {v}"]
     if method == "POST":
@@ -363,24 +368,113 @@ def _zte_radio(d: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# --- shared ZTE login session ----------------------------------------------
+# ZTE CPEs (MC801A, and the MF dongles) honour only the MOST RECENT login: an
+# older session still passes a single `cmd=loginfo`, but every multi_data status
+# poll comes back with loginfo "" and blank values. The router's own web UI
+# treats three such polls as a logout, so any login we did (SMS, rotation,
+# signal poll) threw the user out of the router page seconds after they logged
+# in. Everything — modemproxy and the browser through the panel's router proxy —
+# therefore shares ONE session per device, stored in this cookie jar, and we
+# only log in when that session is really gone.
+_SESSION_JAR_PREFIX = "zte-session-"
+_IPV4_RE = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
+
+
+def _is_session_jar(path: str) -> bool:
+    return os.path.basename(path).startswith(_SESSION_JAR_PREFIX)
+
+
 def _zte_session_jar(host: str, iface: str | None) -> str:
-    """Persistent cookie jar so the status poll reuses one router session
-    instead of logging in every discovery cycle."""
+    """Jar path for one device. USB dongles share a gateway IP (192.168.0.1),
+    so they are keyed by interface; LAN routers by their unique host IP (the
+    callers bind those by source IP or not at all)."""
     from ..config import STATE_DIR
-    tag = re.sub(r"[^A-Za-z0-9]", "_", iface or host)
-    return str(STATE_DIR / f"zte-session-{tag}.cookies")
+    key = iface if iface and not _IPV4_RE.match(iface) else host
+    return str(STATE_DIR / f"{_SESSION_JAR_PREFIX}{re.sub(r'[^A-Za-z0-9]', '_', key)}.cookies")
+
+
+def zte_session_jar_for(modem: dict[str, Any]) -> str:
+    return _zte_session_jar(modem["mgmt_host"],
+                            None if modem.get("manual") else modem.get("iface"))
+
+
+def zte_session_cookie(jar: str) -> str | None:
+    """The session cookie ("stok=...") stored in a jar, if any."""
+    try:
+        lines = Path(jar).read_text().splitlines()
+    except OSError:
+        return None
+    for ln in lines:
+        f = ln.split("\t")
+        if len(f) == 7 and f[5] == "stok" and f[6]:
+            return f"stok={f[6]}"
+    return None
+
+
+def zte_adopt_session(jar: str, host: str, set_cookie: str) -> None:
+    """Make a session the browser just logged into the shared one."""
+    name, _, rest = set_cookie.partition("=")
+    value = rest.split(";", 1)[0].strip()
+    if name.strip() != "stok" or not value:
+        return
+    tmp = f"{jar}.tmp{os.getpid()}"
+    Path(tmp).write_text("# Netscape HTTP Cookie File\n"
+                         f"#HttpOnly_{host}\tFALSE\t/\tFALSE\t0\tstok\t{value}\n")
+    os.replace(tmp, jar)
+
+
+def _zte_bind(host: str, iface: str | None) -> str | None:
+    """Source to reach a device from. The ZTE session is tied to the client IP
+    as well as the cookie, so every call to a LAN router must leave from the
+    same address the panel's router proxy uses: its bind IP."""
+    if iface:
+        return iface
+    for m in db.list_modems():
+        if m.get("manual") and m.get("mgmt_host") == host and m.get("bind_ip"):
+            return m["bind_ip"]
+    return None
+
+
+def _zte_logged_in(host: str, iface: str | None, cj: str) -> bool:
+    """True only if cj holds the device's CURRENT session (multi_data view)."""
+    ok, text = _http(iface, f"http://{host}/goform/goform_get_cmd_process"
+                     "?isTest=false&multi_data=1&cmd=loginfo",
+                     headers={"Referer": f"http://{host}/",
+                              "X-Requested-With": "XMLHttpRequest"},
+                     cookies=cj, timeout=5)
+    try:
+        return ok and json.loads(text).get("loginfo") == "ok"
+    except ValueError:
+        return False
+
+
+def _zte_session(host: str, iface: str | None) -> str:
+    """Shared session jar for the device, logging in only if it has expired.
+    Serialised across processes (web + timers) so two of them never log in
+    back to back and invalidate each other."""
+    import fcntl
+    cj = _zte_session_jar(host, iface)
+    iface = _zte_bind(host, iface)
+    with open(cj + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not _zte_logged_in(host, iface, cj):
+            _zte_login(host, iface, cj)
+    return cj
 
 
 def _status_zte(host: str, iface: str | None = None) -> dict[str, Any] | None:
     """ZTE goform: signalbar (0-5), network_provider, radio metrics.
 
     MF-series dongles answer RSRP/RSRQ/SINR anonymously; MC801A CPEs blank them
-    unless logged in, so we log in (reusing a persisted session) and ask again.
+    unless logged in, so we use the shared session (see _zte_session).
     """
     url = (f"http://{host}/goform/goform_get_cmd_process"
-           "?isTest=false&multi_data=1&cmd=signalbar,network_provider,"
+           "?isTest=false&multi_data=1&cmd=signalbar,network_provider,loginfo,"
            + ",".join([*_ZTE_RADIO, *_ZTE_RADIO_TEXT]))
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
+    cj = _zte_session_jar(host, iface)
+    iface = _zte_bind(host, iface)
 
     def _get(cj: str | None) -> dict[str, Any] | None:
         ok, text = _http(iface, url, headers=headers, cookies=cj, timeout=5)
@@ -391,12 +485,12 @@ def _status_zte(host: str, iface: str | None = None) -> dict[str, Any] | None:
         except ValueError:
             return None
 
-    cj = _zte_session_jar(host, iface)
     d = _get(cj)
     if d is None or ("signalbar" not in d and "network_provider" not in d):
         return None
-    if not _zte_radio(d) and get_config().default_hilink_password:
-        _zte_login(host, iface, cj)
+    if (not _zte_radio(d) and d.get("loginfo") != "ok"
+            and get_config().default_hilink_password):
+        _zte_session(host, iface)
         d = _get(cj) or d
     out: dict[str, Any] = {}
     bars = d.get("signalbar")
@@ -648,7 +742,7 @@ def _zte_login(host: str, iface: str | None, cj: str) -> None:
     # ZTE LD-challenge: final = SHA256( SHA256(pw)_UPPER + LD )_UPPER
     ld = ""
     ok, text = _http(iface, f"{base}/goform_get_cmd_process?isTest=false&cmd=LD",
-                     headers=headers, cookies=cj)
+                     headers=headers, cookies=cj, save_cookies=True)
     if ok and text:
         try:
             ld = json.loads(text).get("LD", "")
@@ -665,7 +759,7 @@ def _zte_login(host: str, iface: str | None, cj: str) -> None:
                 "username": base64.b64encode(b"admin").decode(),
                 "password": base64.b64encode(pw.encode()).decode()}
     _http(iface, f"{base}/goform_set_cmd_process", method="POST",
-          data=data, headers=headers, cookies=cj)
+          data=data, headers=headers, cookies=cj, save_cookies=True)
 
 
 def _zte_get(host: str, iface: str | None, cj: str,
@@ -693,57 +787,45 @@ def _rotate_zte(host: str, iface: str | None = None) -> bool:
     """
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
     base = f"http://{host}/goform/goform_set_cmd_process"
-    cj = tempfile.mktemp(prefix="mp_zte_")
+    cj = _zte_session(host, iface)
+    iface = _zte_bind(host, iface)
     import time
-    try:
-        _zte_login(host, iface, cj)
-        wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
-        cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
-        base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+    wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
+    cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
+    base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
 
-        def _set(**params: str) -> bool:
-            data = {"isTest": "false", **params}
-            rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
-            if rd and base_hash:
-                data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
-            ok, r = _http(iface, base, method="POST", headers=headers,
-                          cookies=cj, data=data)
-            return ok and "failure" not in r.lower()
+    def _set(**params: str) -> bool:
+        data = {"isTest": "false", **params}
+        rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+        if rd and base_hash:
+            data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+        ok, r = _http(iface, base, method="POST", headers=headers,
+                      cookies=cj, data=data)
+        return ok and "failure" not in r.lower()
 
-        ok1 = _set(notCallback="true", goformId="DISCONNECT_NETWORK")
-        # Toggle RAT to force a fresh attach: drop to 3G, then restore auto.
-        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="Only_WCDMA")
-        time.sleep(1)
-        # Restore value differs by firmware — NETWORK_auto (MF-series dongles),
-        # 4G_AND_5G (MC801A 5G CPE). The unsupported one returns "failure" and is
-        # ignored, so the right one wins and neither family is left stuck on 3G.
-        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="NETWORK_auto")
-        _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="4G_AND_5G")
-        time.sleep(1)
-        ok2 = _set(notCallback="true", goformId="CONNECT_NETWORK")
-        return ok1 or ok2
-    finally:
-        try:
-            os.unlink(cj)
-        except OSError:
-            pass
+    ok1 = _set(notCallback="true", goformId="DISCONNECT_NETWORK")
+    # Toggle RAT to force a fresh attach: drop to 3G, then restore auto.
+    _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="Only_WCDMA")
+    time.sleep(1)
+    # Restore value differs by firmware — NETWORK_auto (MF-series dongles),
+    # 4G_AND_5G (MC801A 5G CPE). The unsupported one returns "failure" and is
+    # ignored, so the right one wins and neither family is left stuck on 3G.
+    _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="NETWORK_auto")
+    _set(goformId="SET_BEARER_PREFERENCE", BearerPreference="4G_AND_5G")
+    time.sleep(1)
+    ok2 = _set(notCallback="true", goformId="CONNECT_NETWORK")
+    return ok1 or ok2
 
 
 def reboot_zte(host: str, iface: str | None = None) -> bool:
     """Reboot a ZTE dongle/router via the web API (authed)."""
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
-    cj = tempfile.mktemp(prefix="mp_zte_")
-    try:
-        _zte_login(host, iface, cj)
-        ok, _ = _http(iface, f"http://{host}/goform/goform_set_cmd_process",
-                      method="POST", headers=headers, cookies=cj,
-                      data={"isTest": "false", "goformId": "REBOOT_DEVICE"})
-        return ok
-    finally:
-        try:
-            os.unlink(cj)
-        except OSError:
-            pass
+    cj = _zte_session(host, iface)
+    iface = _zte_bind(host, iface)
+    ok, _ = _http(iface, f"http://{host}/goform/goform_set_cmd_process",
+                  method="POST", headers=headers, cookies=cj,
+                  data={"isTest": "false", "goformId": "REBOOT_DEVICE"})
+    return ok
 
 
 # --- SMS (net-mode ZTE goform) --------------------------------------------
@@ -851,37 +933,30 @@ def list_sms_zte(host: str, iface: str | None = None) -> list[dict[str, Any]]:
     """Read the ZTE inbox/outbox. Returns newest-first list of dicts:
     {id, number, text, date, direction ('in'|'out'), unread(bool)}."""
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
-    cj = tempfile.mktemp(prefix="mp_zte_")
+    cj = _zte_session(host, iface)
+    key = _zte_enc_key(host, iface, cj, headers, _zte_base_hash(host, iface, cj, headers))
+    url = (f"http://{host}/goform/goform_get_cmd_process?isTest=false"
+           "&cmd=sms_data_total&page=0&data_per_page=500&mem_store=1"
+           "&tags=10&order_by=order+by+id+desc")
+    ok, text = _http(iface, url, headers=headers, cookies=cj, timeout=12)
+    if not ok or not text:
+        return []
     try:
-        _zte_login(host, iface, cj)
-        key = _zte_enc_key(host, iface, cj, headers, _zte_base_hash(host, iface, cj, headers))
-        url = (f"http://{host}/goform/goform_get_cmd_process?isTest=false"
-               "&cmd=sms_data_total&page=0&data_per_page=500&mem_store=1"
-               "&tags=10&order_by=order+by+id+desc")
-        ok, text = _http(iface, url, headers=headers, cookies=cj, timeout=12)
-        if not ok or not text:
-            return []
-        try:
-            msgs = json.loads(text).get("messages", []) or []
-        except ValueError:
-            return []
-        out = []
-        for m in msgs:
-            tag = str(m.get("tag", ""))
-            out.append({
-                "id": str(m.get("id", "")),
-                "number": _maybe_ucs2(_zte_gcm_decrypt(key, m.get("number", ""))),
-                "text": _ucs2_decode(_zte_gcm_decrypt(key, m.get("content", ""))),
-                "date": _zte_date(m.get("date", "")),
-                "direction": "out" if tag in _ZTE_SENT_TAGS else "in",
-                "unread": tag == "0",
-            })
-        return out
-    finally:
-        try:
-            os.unlink(cj)
-        except OSError:
-            pass
+        msgs = json.loads(text).get("messages", []) or []
+    except ValueError:
+        return []
+    out = []
+    for m in msgs:
+        tag = str(m.get("tag", ""))
+        out.append({
+            "id": str(m.get("id", "")),
+            "number": _maybe_ucs2(_zte_gcm_decrypt(key, m.get("number", ""))),
+            "text": _ucs2_decode(_zte_gcm_decrypt(key, m.get("content", ""))),
+            "date": _zte_date(m.get("date", "")),
+            "direction": "out" if tag in _ZTE_SENT_TAGS else "in",
+            "unread": tag == "0",
+        })
+    return out
 
 
 def send_sms_zte(host: str, iface: str | None, number: str, text: str) -> bool:
@@ -889,31 +964,24 @@ def send_sms_zte(host: str, iface: str | None, number: str, text: str) -> bool:
     import time
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
     base = f"http://{host}/goform/goform_set_cmd_process"
-    cj = tempfile.mktemp(prefix="mp_zte_")
-    try:
-        _zte_login(host, iface, cj)
-        base_hash = _zte_base_hash(host, iface, cj, headers)
-        # Encrypted-web dongles expect Number/MessageBody AES-GCM'd with the
-        # session key; plain devices get the raw values (key is None).
-        key = _zte_enc_key(host, iface, cj, headers, base_hash)
-        sms_time = time.strftime("%y;%m;%d;%H;%M;%S;+8")
-        data = {
-            "isTest": "false", "goformId": "SEND_SMS", "notCallback": "true",
-            "Number": _zte_gcm_encrypt(key, number), "sms_time": sms_time,
-            "MessageBody": _zte_gcm_encrypt(key, _ucs2_encode(text)),
-            "ID": "-1", "encode_type": "UNICODE",
-        }
-        rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
-        if rd and base_hash:
-            data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
-        ok, r = _http(iface, base, method="POST", headers=headers, cookies=cj,
-                      data=data, timeout=15)
-        return ok and "failure" not in r.lower()
-    finally:
-        try:
-            os.unlink(cj)
-        except OSError:
-            pass
+    cj = _zte_session(host, iface)
+    base_hash = _zte_base_hash(host, iface, cj, headers)
+    # Encrypted-web dongles expect Number/MessageBody AES-GCM'd with the
+    # session key; plain devices get the raw values (key is None).
+    key = _zte_enc_key(host, iface, cj, headers, base_hash)
+    sms_time = time.strftime("%y;%m;%d;%H;%M;%S;+8")
+    data = {
+        "isTest": "false", "goformId": "SEND_SMS", "notCallback": "true",
+        "Number": _zte_gcm_encrypt(key, number), "sms_time": sms_time,
+        "MessageBody": _zte_gcm_encrypt(key, _ucs2_encode(text)),
+        "ID": "-1", "encode_type": "UNICODE",
+    }
+    rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+    if rd and base_hash:
+        data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+    ok, r = _http(iface, base, method="POST", headers=headers, cookies=cj,
+                  data=data, timeout=15)
+    return ok and "failure" not in r.lower()
 
 
 def delete_sms_zte(host: str, iface: str | None, ids: list[str]) -> bool:
@@ -923,25 +991,18 @@ def delete_sms_zte(host: str, iface: str | None, ids: list[str]) -> bool:
         return True
     headers = {"Referer": f"http://{host}/", "X-Requested-With": "XMLHttpRequest"}
     base = f"http://{host}/goform/goform_set_cmd_process"
-    cj = tempfile.mktemp(prefix="mp_zte_")
-    try:
-        _zte_login(host, iface, cj)
-        wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
-        cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
-        base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
-        data = {"isTest": "false", "goformId": "DELETE_SMS",
-                "msg_id": ";".join(ids) + ";", "notCallback": "true"}
-        rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
-        if rd and base_hash:
-            data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
-        ok, r = _http(iface, base, method="POST", headers=headers, cookies=cj,
-                      data=data, timeout=12)
-        return ok and "failure" not in r.lower()
-    finally:
-        try:
-            os.unlink(cj)
-        except OSError:
-            pass
+    cj = _zte_session(host, iface)
+    wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
+    cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
+    base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+    data = {"isTest": "false", "goformId": "DELETE_SMS",
+            "msg_id": ";".join(ids) + ";", "notCallback": "true"}
+    rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+    if rd and base_hash:
+        data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+    ok, r = _http(iface, base, method="POST", headers=headers, cookies=cj,
+                  data=data, timeout=12)
+    return ok and "failure" not in r.lower()
 
 
 def sms_list(modem: dict[str, Any]) -> list[dict[str, Any]]:
