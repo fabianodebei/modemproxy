@@ -43,3 +43,11 @@ def test_stop_sets_disabled(modem):
     generator.stop_proxy(modem, locked=True)
     p = db.get_port(modem)
     assert p["enabled"] == 0 and p["quota_locked"] == 1
+
+
+def test_config_lists_several_dns_servers_one_per_line(modem):
+    from modemproxy.proxy import generator
+    generator.allocate_port(modem)
+    text = generator.render_modem(modem).read_text()
+    lines = [l for l in text.splitlines() if l.startswith("nserver")]
+    assert len(lines) >= 2 and all(len(l.split()) == 2 for l in lines)

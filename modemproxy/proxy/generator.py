@@ -83,6 +83,13 @@ def allocate_port(imei: str, *, username: str | None = None,
     return db.get_port(imei)
 
 
+# Several resolvers, one `nserver` line each: 3proxy falls through to the next
+# on timeout. With a single one, an outage of that resolver on the server's
+# uplink (1.1.1.1 went unreachable from the home line on 2026-09-17) hung
+# every request ~15 s and then failed.
+DEFAULT_DNS = ["8.8.8.8", "1.1.1.1", "9.9.9.9"]
+
+
 def render_modem(imei: str) -> Path:
     """Write the 3proxy config for one modem; return its path."""
     cfg = get_config()
@@ -90,7 +97,7 @@ def render_modem(imei: str) -> Path:
     port = db.get_port(imei)
     if not modem or not port:
         raise ValueError(f"modem/port not configured for {imei}")
-    dns = " ".join(cfg.dns_servers) if cfg.dns_servers else "1.1.1.1"
+    dns = cfg.dns_servers or DEFAULT_DNS
     name = modem.get("name") or imei[-6:]
     white_list = json.loads(port.get("white_list") or "[]")
     text = _env.get_template("3proxy.cfg.j2").render(
@@ -326,7 +333,7 @@ def _render_pool_text() -> str | None:
     if not members:
         return None
     http_port, socks_port = _pool_ports(cfg)
-    dns = " ".join(cfg.dns_servers) if cfg.dns_servers else "1.1.1.1"
+    dns = cfg.dns_servers or DEFAULT_DNS
     return _env.get_template("3proxy.pool.cfg.j2").render(
         dns=dns, username=cfg.pool_username or "pool", password=_pool_password(cfg),
         http_port=http_port, socks_port=socks_port, bind_address=cfg.bind_address,
