@@ -12,7 +12,8 @@ import sys
 from . import db
 from .modems import control, manager
 from .proxy import generator
-from .services import alerts, bandwidth, openvpn, publish, quota, subscriptions, tests
+from .services import (alerts, bandwidth, healthcheck, openvpn, publish, quota,
+                       subscriptions, tests)
 
 
 def _print_json(obj) -> None:
@@ -300,6 +301,13 @@ def cmd_publish_sync(args) -> int:
     return 0
 
 
+def cmd_healthcheck(args) -> int:
+    """Check the whole chain, self-heal, alert. Non-zero exit if anything fails."""
+    res = healthcheck.run(boot=args.boot, notify=not args.quiet)
+    _print_json(res)
+    return 0 if res["ok"] else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="modemproxy", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -310,6 +318,12 @@ def build_parser() -> argparse.ArgumentParser:
         return sp
 
     add("init-db", cmd_init_db, "create database schema")
+
+    sp = add("healthcheck", cmd_healthcheck,
+             "end-to-end check (proxies, DNS, LAN, VPN, public access) + self-heal")
+    sp.add_argument("--boot", action="store_true",
+                    help="post-boot run: always send the Telegram report")
+    sp.add_argument("--quiet", action="store_true", help="never send alerts")
 
     sp = add("discover", cmd_discover, "scan ModemManager and sync DB")
     sp.add_argument("--json", action="store_true")

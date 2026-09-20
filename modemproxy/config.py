@@ -34,6 +34,9 @@ class Config:
     # Rotation
     rotation_default_interval: int = 0   # seconds; 0 = manual only
     dns_servers: list[str] = field(default_factory=list)  # empty = use modem DNS
+    # LAN address the panel/split-DNS are published on; the health check warns
+    # if a reboot (or a power cut) leaves the server on a different lease.
+    lan_address: str = ""
 
     # Modem handling
     dhcp_method: str = "modemmanager"    # modemmanager | dhcpcd
