@@ -262,6 +262,61 @@
                 </template>
               </div>
 
+              <!-- band lock -->
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-slate-400">Banda radio</p>
+                <template x-if="!bandInfo">
+                  <p class="text-xs text-slate-500">caricamento…</p>
+                </template>
+                <template x-if="bandInfo && bandInfo.error">
+                  <p class="text-xs text-slate-500" x-text="bandInfo.error"></p>
+                </template>
+                <template x-if="bandInfo && !bandInfo.error">
+                  <div class="space-y-2">
+                    <p class="text-xs font-mono text-slate-300">
+                      <span x-text="bandInfo.active_band || '—'"></span>
+                      <span x-show="bandInfo.active_nr_band" x-text="' + ' + bandInfo.active_nr_band"></span>
+                      <span class="text-slate-500" x-text="` · ${bandInfo.network_type||''} · RSRP ${bandInfo.rsrp ?? '—'}`"></span>
+                    </p>
+                    <p class="text-xs" :class="bandInfo.locked ? 'text-amber-400' : 'text-slate-500'"
+                       x-text="bandInfo.locked ? ('bloccato su ' + bandInfo.lte.map(b=>'B'+b).join(', ')) : 'nessun blocco (sceglie il modem)'"></p>
+                    <div class="flex gap-2">
+                      <select x-model="bandChoice"
+                              class="flex-1 px-2 py-1.5 rounded-lg bg-ink-700 text-xs">
+                        <option value="">— scegli banda —</option>
+                        <template x-for="b in bandInfo.supported_lte" :key="b">
+                          <option :value="b" x-text="'LTE B'+b"></option>
+                        </template>
+                      </select>
+                      <button @click="lockBand(selected)" :disabled="busy || !bandChoice"
+                              class="px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-xs">Blocca</button>
+                      <button @click="unlockBand(selected)" :disabled="busy || !bandInfo.locked"
+                              class="px-3 py-1.5 rounded-lg bg-ink-700 hover:bg-ink-600 text-xs">Sblocca</button>
+                    </div>
+                    <button @click="scanBands(selected)" :disabled="busy || scanStatus==='running'"
+                            class="w-full px-3 py-1.5 rounded-lg bg-ink-700 hover:bg-ink-600 text-xs">
+                      <span x-show="scanStatus!=='running'">Scansiona le bande (minuti, interrompe la linea)</span>
+                      <span x-show="scanStatus==='running'">scansione in corso…</span>
+                    </button>
+                    <template x-if="bandInfo.scan && bandInfo.scan.results">
+                      <div class="text-[11px] font-mono space-y-0.5">
+                        <p class="font-sans text-slate-500">
+                          Ultima scansione: <span x-text="new Date(bandInfo.scan.ts*1000).toLocaleString()"></span>
+                          <span x-show="bandInfo.scan.best" class="text-emerald-400"
+                                x-text="` — migliore: B${bandInfo.scan.best}`"></span>
+                        </p>
+                        <template x-for="r in bandInfo.scan.results.slice(0,8)" :key="r.band">
+                          <p :class="r.online ? 'text-slate-300' : 'text-slate-600'">
+                            <span x-text="'B'+r.band"></span>
+                            <span x-text="r.online ? ` RSRP ${r.rsrp ?? '—'} · SINR ${r.sinr ?? '—'}` : ' offline'"></span>
+                          </p>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+
               <!-- bandwidth today -->
               <div class="space-y-2">
                 <p class="text-xs font-medium text-slate-400">Bandwidth (today)</p>
@@ -337,6 +392,7 @@ function dashboard(){
     ussdCode:'', ussdResp:'', testResult:null, speedResult:null,
     newQuotaMB:0, newQuotaDir:'both',
     bwToday:{day_in:0, day_out:0},
+    bandInfo:null, bandChoice:'', scanStatus:'',
     init(){},
     notify(t){ this.toast=t; clearTimeout(this._t); this._t=setTimeout(()=>this.toast='',2500); },
     async api(method,url,body){
@@ -387,7 +443,29 @@ function dashboard(){
       this.newWl=(JSON.parse(m.white_list||'[]')).join('\n');
       this.ussdCode=''; this.ussdResp=''; this.testResult=null; this.speedResult=null;
       this.newQuotaMB=Math.round((m.quota_bytes||0)/1048576); this.newQuotaDir=m.quota_direction||'both';
-      this.loadBandwidthToday(m); },
+      this.loadBandwidthToday(m); this.loadBands(m); },
+    async loadBands(m){
+      this.bandInfo=null; this.bandChoice=''; this.scanStatus='';
+      try{ this.bandInfo=await (await fetch(`/api/modems/${m.imei}/bands`)).json(); }
+      catch(e){ this.bandInfo={error:'bande non disponibili su questo modem'}; }
+      if(this.bandInfo && this.bandInfo.detail) this.bandInfo={error:this.bandInfo.detail};
+    },
+    async lockBand(m){
+      await this.api('POST',`/api/modems/${m.imei}/bands`,{lte:[parseInt(this.bandChoice)]});
+      await this.loadBands(m); await this.refresh(); this.notify('Banda bloccata'); },
+    async unlockBand(m){
+      await this.api('POST',`/api/modems/${m.imei}/bands`,{lte:[]});
+      await this.loadBands(m); await this.refresh(); this.notify('Blocco rimosso'); },
+    async scanBands(m){
+      await this.api('POST',`/api/modems/${m.imei}/bands/scan`);
+      this.scanStatus='running'; this.notify('Scansione avviata: dura qualche minuto');
+      const poll=setInterval(async ()=>{
+        await this.loadBands(m);
+        const scan=this.bandInfo && this.bandInfo.scan;
+        if(scan && (Date.now()/1000 - scan.ts) < 120){ clearInterval(poll); this.scanStatus='';
+          this.notify('Scansione completata' + (scan.best ? `: migliore B${scan.best}` : '')); }
+      }, 20000);
+      setTimeout(()=>{ clearInterval(poll); this.scanStatus=''; }, 20*60*1000); },
     hookUrl(m){ return `${HOOK_BASE || location.origin}/hook/rotate/${m.rotation_token}`; },
     hookDisabled(m){ return HOOK_EXCLUDE.includes(m.imei); },
     async rotate(m){ this.notify('Rotating...'); const r=await this.api('POST',`/api/modems/${m.imei}/rotate`); await this.refresh(); this.notify('New IP: '+(r.new_ip||'pending')); },

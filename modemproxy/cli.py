@@ -308,6 +308,54 @@ def cmd_healthcheck(args) -> int:
     return 0 if res["ok"] else 1
 
 
+def cmd_band_show(args) -> int:
+    from .modems import bands
+    m = db.get_modem(args.imei)
+    if not m:
+        print("modem non trovato", file=sys.stderr)
+        return 1
+    _print_json(bands.read(m))
+    return 0
+
+
+def cmd_band_lock(args) -> int:
+    from .modems import bands
+    m = db.get_modem(args.imei)
+    if not m:
+        print("modem non trovato", file=sys.stderr)
+        return 1
+    try:
+        _print_json(bands.apply(m, args.lte, args.nr))
+    except bands.BandError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_band_clear(args) -> int:
+    from .modems import bands
+    m = db.get_modem(args.imei)
+    if not m:
+        print("modem non trovato", file=sys.stderr)
+        return 1
+    try:
+        _print_json(bands.clear(m))
+    except bands.BandError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_band_scan(args) -> int:
+    from .modems import bands
+    m = db.get_modem(args.imei)
+    if not m:
+        print("modem non trovato", file=sys.stderr)
+        return 1
+    _print_json(bands.scan(m, args.bands or None, settle=args.settle))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="modemproxy", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -318,6 +366,22 @@ def build_parser() -> argparse.ArgumentParser:
         return sp
 
     add("init-db", cmd_init_db, "create database schema")
+
+    sp = add("band-show", cmd_band_show, "mostra banda attiva e blocco")
+    sp.add_argument("imei")
+
+    sp = add("band-lock", cmd_band_lock, "blocca il modem su una o piu' bande")
+    sp.add_argument("imei")
+    sp.add_argument("--lte", type=int, nargs="+", required=True, help="es. --lte 3")
+    sp.add_argument("--nr", type=int, nargs="*", default=None, help="bande 5G, es. --nr 78")
+
+    sp = add("band-clear", cmd_band_clear, "toglie il blocco banda")
+    sp.add_argument("imei")
+
+    sp = add("band-scan", cmd_band_scan, "prova le bande una per una e le classifica")
+    sp.add_argument("imei")
+    sp.add_argument("--bands", type=int, nargs="*", help="bande da provare (default: le comuni)")
+    sp.add_argument("--settle", type=int, default=25, help="secondi di attesa per banda")
 
     sp = add("healthcheck", cmd_healthcheck,
              "end-to-end check (proxies, DNS, LAN, VPN, public access) + self-heal")

@@ -775,6 +775,27 @@ def _zte_get(host: str, iface: str | None, cj: str,
         return {}
 
 
+def zte_set(host: str, iface: str | None, cj: str, headers: dict[str, str],
+            base_hash: str, **params: str) -> str:
+    """One authed ZTE set-command. Newer CPE (MC801A) reject anything without an
+    ``AD`` anti-CSRF token — MD5(MD5(wa_inner_version + cr_version) + RD), with a
+    fresh RD nonce per request. Returns the raw response body."""
+    data = {"isTest": "false", **params}
+    rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
+    if rd and base_hash:
+        data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
+    ok, r = _http(iface, f"http://{host}/goform/goform_set_cmd_process", method="POST",
+                  headers=headers, cookies=cj, data=data, timeout=20)
+    return r.strip() if ok else ""
+
+
+def zte_base_hash(host: str, iface: str | None, cj: str, headers: dict[str, str]) -> str:
+    """Firmware fingerprint the AD token is derived from."""
+    wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
+    cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
+    return hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+
+
 def _rotate_zte(host: str, iface: str | None = None) -> bool:
     """ZTE goform rotation.
 
@@ -790,18 +811,11 @@ def _rotate_zte(host: str, iface: str | None = None) -> bool:
     cj = _zte_session(host, iface)
     iface = _zte_bind(host, iface)
     import time
-    wv = _zte_get(host, iface, cj, headers, "wa_inner_version").get("wa_inner_version", "")
-    cv = _zte_get(host, iface, cj, headers, "cr_version").get("cr_version", "")
-    base_hash = hashlib.md5((wv + cv).encode()).hexdigest() if (wv or cv) else ""
+    base_hash = zte_base_hash(host, iface, cj, headers)
 
     def _set(**params: str) -> bool:
-        data = {"isTest": "false", **params}
-        rd = _zte_get(host, iface, cj, headers, "RD").get("RD", "")
-        if rd and base_hash:
-            data["AD"] = hashlib.md5((base_hash + rd).encode()).hexdigest()
-        ok, r = _http(iface, base, method="POST", headers=headers,
-                      cookies=cj, data=data)
-        return ok and "failure" not in r.lower()
+        r = zte_set(host, iface, cj, headers, base_hash, **params)
+        return bool(r) and "failure" not in r.lower()
 
     ok1 = _set(notCallback="true", goformId="DISCONNECT_NETWORK")
     # Toggle RAT to force a fresh attach: drop to 3G, then restore auto.

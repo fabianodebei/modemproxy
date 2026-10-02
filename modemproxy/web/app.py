@@ -7,10 +7,12 @@ either the session cookie or HTTP basic auth.
 from __future__ import annotations
 
 import base64
+import json
 import re
 import logging
 import secrets
 import subprocess
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -481,6 +483,65 @@ def api_modem(imei: str, _: str = Depends(api_auth)):
 @app.post("/api/discover")
 def api_discover(_: str = Depends(api_auth)):
     return manager.discover()
+
+
+@app.get("/api/modems/{imei}/bands")
+def api_bands(imei: str, _: str = Depends(api_auth)):
+    from ..modems import bands
+    m = db.get_modem(imei)
+    if not m:
+        raise HTTPException(404, "not found")
+    try:
+        out = bands.read(m)
+    except bands.BandError as e:
+        raise HTTPException(400, str(e))
+    try:
+        out["scan"] = json.loads(m.get("band_scan") or "null")
+    except ValueError:
+        out["scan"] = None
+    return out
+
+
+@app.post("/api/modems/{imei}/bands")
+def api_bands_set(imei: str, body: dict, _: str = Depends(api_auth)):
+    """Lock to the given LTE/NR bands, or unlock with {"lte": []}."""
+    from ..modems import bands
+    m = db.get_modem(imei)
+    if not m:
+        raise HTTPException(404, "not found")
+    lte = [int(b) for b in (body.get("lte") or [])]
+    nr = [int(b) for b in (body.get("nr") or [])]
+    try:
+        return bands.apply(m, lte, nr) if lte else bands.clear(m)
+    except bands.BandError as e:
+        raise HTTPException(400, str(e))
+
+
+# A scan takes minutes (every band is tried in turn), far longer than any
+# browser will wait: run it in a thread and let the dashboard poll GET /bands.
+_band_scans: dict[str, str] = {}
+
+
+@app.post("/api/modems/{imei}/bands/scan")
+def api_bands_scan(imei: str, _: str = Depends(api_auth)):
+    from ..modems import bands
+    m = db.get_modem(imei)
+    if not m:
+        raise HTTPException(404, "not found")
+    if _band_scans.get(imei) == "running":
+        return {"status": "running"}
+
+    def _run():
+        try:
+            bands.scan(m)
+            _band_scans[imei] = "done"
+        except Exception as exc:                       # noqa: BLE001 - reported below
+            logging.getLogger("modemproxy").warning("band scan %s: %s", imei, exc)
+            _band_scans[imei] = f"error: {exc}"
+
+    _band_scans[imei] = "running"
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "running"}
 
 
 @app.post("/api/modems/{imei}/rotate")

@@ -76,6 +76,29 @@ def _check_proxy(m: dict) -> tuple[bool, str, bool]:
     return False, "nessuna uscita internet", healed
 
 
+def _check_band_locks(modems: list[dict]) -> tuple[bool, str, list[str]]:
+    """A band lock is a loaded gun: if the locked band goes away the modem stays
+    out of the network. The guard unlocks after a few failed checks (see
+    bands.guard) so a dead cell costs minutes, not a night."""
+    from ..modems import bands
+    locked, freed = [], []
+    for m in modems:
+        try:
+            msg = bands.guard(m)
+        except Exception as exc:                        # device unreachable, etc.
+            log.debug("guard bande %s: %s", m.get("name"), exc)
+            continue
+        if msg:
+            freed.append(msg)
+        elif (m.get("band_lock") or "").find('"lte": []') == -1 and m.get("band_lock"):
+            locked.append(m.get("name") or m["imei"])
+    if freed:
+        return False, " · ".join(freed), freed
+    if locked:
+        return True, "bloccati su banda fissa: " + ", ".join(locked), []
+    return True, "nessun blocco attivo", []
+
+
 def _check_dns() -> tuple[bool, str]:
     """At least one of the proxies' resolvers must answer."""
     from ..proxy.generator import DEFAULT_DNS
@@ -167,6 +190,11 @@ def run(*, boot: bool = False, notify: bool = True) -> dict[str, Any]:
         checks.append({"key": f"proxy:{m['imei']}", "name": name, "ok": ok, "detail": detail})
         if did_heal and ok:
             healed.append(name)
+
+    band_ok, band_detail, band_freed = _check_band_locks(modems)
+    checks.append({"key": "bands", "name": "Blocco bande", "ok": band_ok,
+                   "detail": band_detail})
+    healed.extend(band_freed)
 
     for key, name, (ok, detail) in (
         ("dns", "DNS", _check_dns()),

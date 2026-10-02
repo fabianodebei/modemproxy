@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS modems (
     ip              TEXT,                -- current public WAN IP
     signal          INTEGER,            -- signal quality %
     radio           TEXT,               -- JSON radio metrics (RSRP/RSRQ/SINR/RSSI)
+    band_lock       TEXT,               -- JSON band lock + original mask
+    band_scan       TEXT,               -- JSON last band scan result
     status          TEXT DEFAULT 'unknown', -- online | offline | unknown
     last_seen       INTEGER,
     created_at      INTEGER
@@ -160,6 +162,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
                  "(ip TEXT PRIMARY KEY, label TEXT, ts INTEGER)")
     if "manual" not in mcols:
         conn.execute("ALTER TABLE modems ADD COLUMN manual INTEGER DEFAULT 0")
+    if "band_lock" not in mcols:
+        # JSON: {"lte":[3],"nr":[78],"default_mask":"0x...","strikes":0}
+        conn.execute("ALTER TABLE modems ADD COLUMN band_lock TEXT")
+        conn.execute("ALTER TABLE modems ADD COLUMN band_scan TEXT")
     if "radio" not in mcols:
         # JSON: {"rsrp","rsrq","sinr","rssi","nr_rsrp",...,"band","nr_band","net"}
         conn.execute("ALTER TABLE modems ADD COLUMN radio TEXT")
