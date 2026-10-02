@@ -1,0 +1,12 @@
+[Unit]
+Description=modemproxy end-to-end health check (proxies, DNS, LAN, VPN, accesso pubblico) + auto-riparazione
+After=network-online.target modemproxy-web.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=MODEMPROXY_CONFIG=/etc/modemproxy/config.yaml
+ExecStart=/opt/modemproxy/venv/bin/modemproxy healthcheck
+SuccessExitStatus=0 1
+TimeoutStartSec=600
+User=root

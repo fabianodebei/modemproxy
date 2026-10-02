@@ -1,0 +1,17 @@
+[Unit]
+Description=modemproxy: controllo completo dopo un riavvio o un blackout (report su Telegram)
+After=network-online.target modemproxy-web.service modemproxy-netdevs.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=MODEMPROXY_CONFIG=/etc/modemproxy/config.yaml
+# Give the modems time to register on the network before judging them.
+ExecStartPre=/bin/sleep 120
+ExecStart=/opt/modemproxy/venv/bin/modemproxy healthcheck --boot
+SuccessExitStatus=0 1
+TimeoutStartSec=900
+User=root
+
+[Install]
+WantedBy=multi-user.target

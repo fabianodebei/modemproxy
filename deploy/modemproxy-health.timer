@@ -1,0 +1,16 @@
+[Unit]
+Description=Controllo completo modemproxy ogni 15 minuti
+
+[Timer]
+# OnCalendar, non OnUnitActiveSec: quest'ultimo pianifica a partire dall'ultima
+# esecuzione del servizio, quindi se il servizio non e' MAI stato eseguito il
+# timer resta attivo ma non parte mai (successo davvero: installato il 20/09,
+# zero esecuzioni fino al 02/10, e un guasto reale non e' stato segnalato).
+OnCalendar=*:0/15
+# Un giro saltato (server spento) viene recuperato al riavvio.
+Persistent=true
+AccuracySec=30
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target
