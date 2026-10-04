@@ -6,7 +6,7 @@
 {% block main %}
 {# ── System: read-only snapshot of what actually runs ─────────────────── #}
 <div class="max-w-2xl mb-6">
-  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
     <h2 class="text-sm font-medium text-slate-200 mb-1">System</h2>
     <p class="text-xs text-slate-500 mb-4">What is actually running on this box.</p>
     <dl class="grid grid-cols-[9rem_1fr] gap-y-2 gap-x-4 text-xs">
@@ -25,7 +25,7 @@
 </div>
 
 <div x-data="access()" class="max-w-2xl mb-6">
-  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
     <div class="mb-4">
       <h2 class="text-sm font-medium text-slate-200">Remote access</h2>
       <p class="text-xs text-slate-500">How customers reach the proxies from outside.</p>
@@ -65,7 +65,7 @@
 </div>
 
 <div x-data="branding()" class="max-w-2xl mb-6">
-  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
     <h2 class="text-sm font-medium text-slate-200 mb-4">Branding</h2>
     <div class="space-y-3">
       <label class="block text-xs text-slate-400">Product name
@@ -94,7 +94,7 @@
 </div>
 
 <div x-data="alerting()" class="max-w-2xl mb-6">
-  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
     <h2 class="text-sm font-medium text-slate-200 mb-1">Telegram alerts</h2>
     <p class="text-xs text-slate-500 mb-4">Bot token from <code>@BotFather</code>; chat id from <code>@userinfobot</code>.</p>
     <label class="flex items-center gap-2 text-xs text-slate-300 mb-3">
@@ -131,7 +131,7 @@
 </div>
 
 <div x-data="custs()" x-init="init()" class="max-w-2xl mb-6">
-  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
     <div class="flex items-center justify-between mb-4">
       <div>
         <h2 class="text-sm font-medium text-slate-200">Customers</h2>
@@ -143,7 +143,8 @@
         <button @click="create()" class="bg-brand-500 hover:bg-brand-600 text-white rounded-lg px-3 py-1.5 text-sm">Add</button>
       </div>
     </div>
-    <table class="w-full text-sm">
+    <div class="overflow-x-auto">
+    <table class="w-full min-w-[560px] text-sm">
       <tbody class="divide-y divide-ink-700">
         <template x-if="list.length===0"><tr><td class="py-4 text-center text-slate-500">No customers.</td></tr></template>
         <template x-for="c in list" :key="c.username">
@@ -174,11 +175,12 @@
         </template>
       </tbody>
     </table>
+    </div>
   </div>
 </div>
 
 <div x-data="advanced()" class="max-w-2xl mb-6">
-  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
     <h2 class="text-sm font-medium text-slate-200 mb-4">Mobile / advanced</h2>
     <div class="space-y-3">
       <label class="block text-xs text-slate-400">HiLink admin password (ZTE/Huawei web API — needed for rotation on CPE like MC801A)
@@ -213,7 +215,7 @@
 </div>
 
 <div x-data="keys()" x-init="init()" class="max-w-2xl">
-  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
     <div class="flex items-center justify-between mb-4">
       <div>
         <h2 class="text-sm font-medium text-slate-200">API keys</h2>
@@ -233,7 +235,8 @@
       <button @click="copy(fresh)" class="ml-2 underline">copy</button>
     </p>
 
-    <table class="w-full text-sm">
+    <div class="overflow-x-auto">
+    <table class="w-full min-w-[560px] text-sm">
       <thead class="text-xs uppercase text-slate-500 border-b border-ink-700">
         <tr><th class="text-left font-medium py-2">Label</th>
             <th class="text-left font-medium py-2">Key</th>
@@ -256,6 +259,7 @@
         </template>
       </tbody>
     </table>
+    </div>
   </div>
 
   <div x-show="toast" x-cloak x-transition style="display:none"

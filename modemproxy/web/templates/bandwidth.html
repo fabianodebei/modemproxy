@@ -8,7 +8,8 @@
 
   <!-- summary table -->
   <div class="bg-ink-800 border border-ink-700 rounded-2xl overflow-hidden mb-6">
-    <table class="w-full text-sm">
+    <div class="overflow-x-auto">
+    <table class="w-full min-w-[560px] text-sm">
       <thead class="text-xs uppercase text-slate-500 border-b border-ink-700">
         <tr>
           <th class="text-left font-medium px-5 py-3"></th>
@@ -38,12 +39,13 @@
         </tr>
       </tbody>
     </table>
+    </div>
   </div>
 
   <!-- current throughput -->
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-5 md:mb-6">
     <template x-for="m in modems" :key="m.imei">
-      <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+      <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
         <p class="text-xs text-slate-400" x-text="m.name || m.model || m.imei"></p>
         <p class="text-sm font-mono mt-2">
           <span class="text-emerald-400" x-text="throughput[m.imei]?.rx_mbps || '—'"></span>↓
@@ -56,7 +58,7 @@
   </div>
 
   <!-- per-modem chart -->
-  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-5">
+  <div class="bg-ink-800 border border-ink-700 rounded-2xl p-4 md:p-5">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-sm font-medium text-slate-300">Throughput (last 24h)</h2>
       <select x-model="imei" @change="load()"

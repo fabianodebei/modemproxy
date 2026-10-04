@@ -5,7 +5,8 @@
 
 {% block main %}
 <div class="bg-ink-800 border border-ink-700 rounded-2xl overflow-hidden">
-  <table class="w-full text-sm">
+  <div class="overflow-x-auto">
+  <table class="w-full min-w-[560px] text-sm">
     <thead class="text-xs uppercase text-slate-500 border-b border-ink-700">
       <tr>
         <th class="text-left font-medium px-5 py-3">Time</th>
@@ -33,5 +34,6 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}
